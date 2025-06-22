@@ -1,4 +1,4 @@
-name: Daily Referer & Origin Updater (All-In-One)
+name: Daily Referer & Origin Updater (Final Version)
 
 on:
   schedule:
@@ -8,6 +8,11 @@ on:
 jobs:
   update-referer:
     runs-on: ubuntu-latest
+    
+    # --- ΑΥΤΗ ΕΙΝΑΙ Η ΠΡΟΣΘΗΚΗ ΠΟΥ ΛΥΝΕΙ ΤΟ ΠΡΟΒΛΗΜΑ ---
+    permissions:
+      contents: write
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -63,7 +68,6 @@ jobs:
             sed -i -E "s|(dokko1new.newkso.ru/dokko1/premium[0-9]+/mono.m3u8)|\\1#Referer=${NEW_REFERER_URL}\&Origin=${NEW_REFERER_URL}|g" "$TARGET_FILE"
           elif [ "$NEW_REFERER_URL" != "$CURRENT_REFERER_URL" ]; then
             echo "Updating all links in $TARGET_FILE"
-            # Χρησιμοποιούμε το # ως διαχωριστικό στο sed για ασφάλεια με τα URL
             sed -i "s#$CURRENT_REFERER_URL#$NEW_REFERER_URL#g" "$TARGET_FILE"
             echo "File updated successfully."
           else
@@ -71,7 +75,7 @@ jobs:
           fi
 
       - name: Commit and push changes
-        if: success() # Τρέχει μόνο αν το προηγούμενο βήμα ήταν επιτυχές
+        if: success()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'ci: Automate update of Referer/Origin URL'
