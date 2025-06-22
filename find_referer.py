@@ -18,7 +18,6 @@ def discover_referer():
     options.add_argument("-headless")
     options.add_argument("--window-size=1920,1080")
     # Ορίζουμε ρητά τη διαδρομή του Firefox
-    options.binary_location = FIREFOX_BINARY_PATH
     options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
 
     driver = webdriver.Firefox(options=options)
