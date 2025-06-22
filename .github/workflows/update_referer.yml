@@ -1,17 +1,15 @@
-name: Daily Referer & Origin Updater (Final Version)
+name: Daily Referer & Origin Updater (Correct Logic)
 
 on:
   schedule:
-    - cron: '15 6 * * *'
+    - cron: '30 6 * * *'
   workflow_dispatch:
 
 jobs:
   update-referer:
     runs-on: ubuntu-latest
-    
-    # --- ΑΥΤΗ ΕΙΝΑΙ Η ΠΡΟΣΘΗΚΗ ΠΟΥ ΛΥΝΕΙ ΤΟ ΠΡΟΒΛΗΜΑ ---
     permissions:
-      contents: write
+      contents: write # Απαραίτητο για να μπορεί το Action να κάνει commit
 
     steps:
       - name: Checkout repository
@@ -24,14 +22,13 @@ jobs:
 
       - name: Fetch Referer and Update File
         run: |
-          # --- Βήμα 1: Εύρεση του νέου Referer ---
+          # --- Βήμα 1: Εύρεση του νέου URL-βάση ---
           SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php"
           echo "Installing Puppeteer..."
           npm i puppeteer --silent > /dev/null 2>&1
           
           echo "Launching browser to find the iframe source URL..."
-
-          NEW_REFERER_URL=$(node -e "
+          NEW_BASE_URL=$(node -e "
             const puppeteer = require('puppeteer');
             (async () => {
               const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
@@ -42,40 +39,38 @@ jobs:
                 const iframeSrc = await page.evaluate(() => document.querySelector('iframe').src);
                 if (iframeSrc) {
                   const url = new URL(iframeSrc);
-                  console.log(url.origin + '/');
+                  console.log(url.origin + '/'); // Επιστρέφει π.χ. https://allupplay.xyz/
                 }
               } catch (e) {
-                // Do nothing, let it return empty
+                // Αποτυχία σημαίνει ότι θα επιστρέψει κενό string
               } finally {
                 await browser.close();
               }
             })();
           ")
 
-          if [ -z "$NEW_REFERER_URL" ]; then
+          if [ -z "$NEW_BASE_URL" ]; then
             echo "::error::Could not extract the new Referer/Origin URL."
             exit 1
           fi
 
-          echo "Successfully extracted new Referer/Origin: $NEW_REFERER_URL"
+          echo "Successfully extracted new base URL: $NEW_BASE_URL"
 
-          # --- Βήμα 2: Ενημέρωση του αρχείου M3U8 (μέσα στο ίδιο step) ---
+          # --- Βήμα 2: Απλή και ισχυρή αντικατάσταση ---
           TARGET_FILE="GreekSportsChannels.m3u8"
-          CURRENT_REFERER_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
+          
+          echo "Updating all links in $TARGET_FILE to use the new Referer/Origin."
 
-          if [ -z "$CURRENT_REFERER_URL" ]; then
-            echo "::warning::No current Referer found. Appending to all links."
-            sed -i -E "s|(dokko1new.newkso.ru/dokko1/premium[0-9]+/mono.m3u8)|\\1#Referer=${NEW_REFERER_URL}\&Origin=${NEW_REFERER_URL}|g" "$TARGET_FILE"
-          elif [ "$NEW_REFERER_URL" != "$CURRENT_REFERER_URL" ]; then
-            echo "Updating all links in $TARGET_FILE"
-            sed -i "s#$CURRENT_REFERER_URL#$NEW_REFERER_URL#g" "$TARGET_FILE"
-            echo "File updated successfully."
-          else
-            echo "Referer is already up-to-date. No changes needed."
-          fi
+          # Αυτή η εντολή sed κάνει όλη τη μαγεία:
+          # Βρίσκει κάθε γραμμή που περιέχει το βασικό μοτίβο του URL...
+          # ...και αντικαθιστά τα πάντα από το # και μετά με το νέο, σωστό Referer & Origin.
+          # Αν δεν υπάρχει #, το προσθέτει.
+          sed -i -E "s|(#.*)?$|#Referer=${NEW_BASE_URL}&Origin=${NEW_BASE_URL}|" "$TARGET_FILE"
+
+          echo "File updated successfully."
+
 
       - name: Commit and push changes
-        if: success()
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'ci: Automate update of Referer/Origin URL'
