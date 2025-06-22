@@ -1,8 +1,8 @@
-name: Automatic Referer Updater (Final Attempt)
+name: Automatic Referer Updater (Final Working Version)
 
 on:
   schedule:
-    - cron: '0 13 * * *'
+    - cron: '0 12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -40,7 +40,7 @@ jobs:
       - name: Run Python script to find the new Referer
         id: find_referer
         run: |
-          # Το script τώρα θα επιστρέψει ΜΟΝΟ το URL ή θα αποτύχει.
+          # Το script τώρα είναι απλό και αξιόπιστο.
           NEW_REFERER=$(python find_referer.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
@@ -58,7 +58,7 @@ jobs:
           fi
           
           if [ "$OLD_URL" == "$NEW_URL" ]; then
-            echo "URL is already up-to-date. No changes needed."
+            echo "Referer is already up-to-date. No changes needed."
             exit 0
           fi
 
@@ -69,7 +69,7 @@ jobs:
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: Automate update of Referer/Origin URL (via Firefox)'
+          commit_message: 'ci: Automate update of Referer/Origin URL'
           commit_user_name: 'GitHub Actions Bot'
           commit_user_email: 'actions@github.com'
           commit_author: 'GitHub Actions Bot <actions@github.com>'
