@@ -5,18 +5,20 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.webdriver.firefox.service import Service as FirefoxService
 
 INSPECTION_URL = "https://miztv.top/stream/stream-622.php"
+FIREFOX_BINARY_PATH = '/usr/bin/firefox' # Η διαδρομή για το εκτελέσιμο του Firefox
 
 def discover_referer():
     """
-    Starts a headless Firefox browser, tries to find the Referer header,
-    and has a fallback method if that fails.
+    Starts a headless Firefox browser, specifying the binary location,
+    and tries to find the Referer header.
     """
     options = FirefoxOptions()
     options.add_argument("-headless")
     options.add_argument("--window-size=1920,1080")
+    # ΟΡΙΖΟΥΜΕ ΡΗΤΑ ΤΗ ΔΙΑΔΡΟΜΗ ΤΟΥ FIREFOX
+    options.binary_location = FIREFOX_BINARY_PATH
     options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
 
     driver = webdriver.Firefox(options=options)
@@ -43,7 +45,7 @@ def discover_referer():
             if req and req.headers.get('Referer'):
                 referer = req.headers['Referer'].strip('/')
                 print(f"SUCCESS (Method 1): Found Referer in network request: {referer}")
-                print(referer) # This is the final output
+                print(referer)
                 return
         except Exception as e:
             print(f"INFO: Method 1 (network request) failed: {e}. Trying fallback.")
@@ -60,7 +62,7 @@ def discover_referer():
             parsed_url = urlparse(iframe_src)
             origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
             print(f"SUCCESS (Method 2): Found Referer from iframe src: {origin}")
-            print(origin) # This is the final output
+            print(origin)
             return
 
         print("ERROR: Both methods failed. Could not determine Referer.", file=sys.stderr)
