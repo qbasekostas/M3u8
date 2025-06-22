@@ -15,23 +15,26 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Install Firefox (APT, not snap)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y firefox
+
+      - name: Install GeckoDriver v0.36.0
+        run: |
+          GECKODRIVER_VERSION="v0.36.0"
+          wget "https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
+          tar -xzf "geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
+          chmod +x geckodriver
+          sudo mv geckodriver /usr/local/bin/
+
+      - name: Check Firefox version
+        run: firefox --version
+
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
-
-      - name: Install Firefox and GeckoDriver
-        run: |
-         sudo apt-get update
-         sudo apt-get install -y firefox
-         GECKODRIVER_VERSION="v0.36.0"
-         wget "https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
-         tar -xzf "geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
-         chmod +x geckodriver
-         sudo mv geckodriver /usr/local/bin/
-
-      - name: Check Firefox version
-        run: firefox --version
 
       - name: Install Python Dependencies
         run: |
@@ -43,8 +46,8 @@ jobs:
         run: |
           NEW_REFERER=$(python find_referer.py | tail -n 1)
           if [[ -z "$NEW_REFERER" || "$NEW_REFERER" == *"ERROR"* ]]; then
-             echo "::error:: Python script failed or returned an empty referer."
-             exit 1
+            echo "::error:: Python script failed or returned an empty referer."
+            exit 1
           fi
           echo "Found new Referer: $NEW_REFERER"
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
