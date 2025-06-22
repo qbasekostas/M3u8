@@ -1,59 +1,57 @@
 import sys
+import time
 from seleniumwire import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
 
+# Ορίζουμε τις σταθερές μας
 INSPECTION_URL = "https://miztv.top/stream/stream-622.php"
 FIREFOX_BINARY_PATH = '/usr/bin/firefox'
+WAIT_SECONDS = 15 # Δίνουμε λίγο παραπάνω χρόνο για το περιβάλλον του GitHub
 
-def discover_referer():
+def find_referer_simple():
+    """
+    Ακολουθεί την απλή λογική: επισκέπτεται τη σελίδα, περιμένει,
+    και ψάχνει στα network requests για το σωστό Referer.
+    """
     options = FirefoxOptions()
     options.add_argument("-headless")
     options.binary_location = FIREFOX_BINARY_PATH
     options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
 
-    driver = webdriver.Firefox(options=options)
-    
-    final_referer = None
-    
+    driver = None
     try:
+        driver = webdriver.Firefox(options=options)
+        
+        # Καθαρίζουμε τα προηγούμενα requests για σιγουριά
+        del driver.requests
+        
+        # 1. Επισκεπτόμαστε τη σελίδα
         driver.get(INSPECTION_URL)
         
-        # Προσπάθεια 1: Network Request
-        try:
-            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
-            driver.switch_to.frame(0)
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.TAG_NAME, "body"))).click()
-            req = driver.wait_for_request(r'.*?\.m3u8', timeout=25)
-            if req and req.headers.get('Referer'):
-                final_referer = req.headers['Referer'].strip('/')
-        except Exception:
-            pass # Απλά συνεχίζουμε στην επόμενη μέθοδο
+        # 2. Περιμένουμε απλά (η κρίσιμη αλλαγή)
+        # Τυπώνουμε τα διαγνωστικά μηνύματα στο stderr για να μην "μολύνουν" την έξοδο
+        print(f"Waiting for {WAIT_SECONDS} seconds for network traffic to be captured...", file=sys.stderr)
+        time.sleep(WAIT_SECONDS)
+        
+        # 3. Ψάχνουμε στα requests
+        for request in reversed(driver.requests):
+            if '.m3u8' in request.url and request.headers.get('Referer'):
+                referer = request.headers['Referer'].strip('/')
+                print(f"SUCCESS: Found Referer: {referer}", file=sys.stderr)
+                # Τυπώνουμε ΜΟΝΟ το τελικό URL στην έξοδο για να το πιάσει το Action
+                print(referer)
+                sys.exit(0) # Βγαίνουμε με επιτυχία
 
-        # Προσπάθεια 2: Fallback στο iframe src (ΜΟΝΟ αν η πρώτη απέτυχε)
-        if not final_referer:
-            driver.switch_to.default_content()
-            iframe = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
-            iframe_src = iframe.get_attribute('src')
-            # Ελέγχουμε αν είναι έγκυρο HTTP URL
-            if iframe_src and iframe_src.startswith('http'):
-                from urllib.parse import urlparse
-                parsed_url = urlparse(iframe_src)
-                final_referer = f"{parsed_url.scheme}://{parsed_url.netloc}"
+        # Αν ο βρόχος τελειώσει χωρίς αποτέλεσμα, σημαίνει αποτυχία.
+        print("ERROR: Could not find any .m3u8 request with a Referer header.", file=sys.stderr)
+        sys.exit(1)
 
     except Exception as e:
-        # Τυπώνουμε το σφάλμα μόνο αν κάτι πάει πολύ στραβά
-        print(f"A critical error occurred: {e}", file=sys.stderr)
+        print(f"ERROR: A critical exception occurred: {e}", file=sys.stderr)
+        sys.exit(1)
     finally:
-        driver.quit()
-        if final_referer:
-            # Τυπώνουμε ΜΟΝΟ το τελικό αποτέλεσμα
-            print(final_referer)
-        else:
-            # Αν δεν βρέθηκε τίποτα, βγαίνουμε με σφάλμα
-            sys.exit(1)
+        if driver:
+            driver.quit()
 
 if __name__ == "__main__":
-    discover_referer()
+    find_referer_simple()
