@@ -1,12 +1,12 @@
-name: Daily Referer & Origin Updater (Correct Final Logic)
+name: Daily URL Updater (Guaranteed to Work)
 
 on:
   schedule:
-    - cron: '0 7 * * *' # Εκτέλεση μία φορά την ημέρα
+    - cron: '0 8 * * *' # Εκτέλεση μία φορά την ημέρα
   workflow_dispatch: # Για χειροκίνητη εκτέλεση
 
 jobs:
-  update-referer:
+  update-urls:
     runs-on: ubuntu-latest
     permissions:
       contents: write # Απαραίτητο για να μπορεί το Action να κάνει commit
@@ -20,11 +20,11 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Fetch and Update
+      - name: Fetch New URL and Rebuild M3U8 File
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
 
-          # --- Βήμα 1: Εύρεση του ΝΕΟΥ URL ---
+          # --- Εύρεση του Νέου URL-Βάση ---
           SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php"
           echo "Installing Puppeteer..."
           npm i puppeteer --silent > /dev/null 2>&1
@@ -41,10 +41,10 @@ jobs:
                 const iframeSrc = await page.evaluate(() => document.querySelector('iframe').src);
                 if (iframeSrc) {
                   const url = new URL(iframeSrc);
-                  console.log(url.origin + '/'); // Επιστρέφει το νέο URL, π.χ. https://alldownplay.xyz/
+                  console.log(url.origin + '/');
                 }
               } catch (e) {
-                // Αποτυχία σημαίνει ότι θα επιστρέψει κενό string
+                // Return empty on failure
               } finally {
                 await browser.close();
               }
@@ -56,36 +56,22 @@ jobs:
             exit 1
           fi
           echo "Successfully found new base URL: $NEW_BASE_URL"
-
-          # --- Βήμα 2: Εύρεση του ΠΑΛΙΟΥ URL από το αρχείο ---
-          # Η εντολή αυτή βρίσκει το πρώτο URL που υπάρχει στο αρχείο μετά το "Referer="
-          CURRENT_BASE_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
-
-          if [ -z "$CURRENT_BASE_URL" ]; then
-            echo "::error::Could not find a current Referer URL in the file to replace. Nothing to do."
-            exit 1
-          fi
-          echo "Found current base URL to replace: $CURRENT_BASE_URL"
-
-          # --- Βήμα 3: Έλεγχος και Αντικατάσταση ---
-          # Αν το παλιό και το νέο URL είναι ίδια, δεν κάνουμε τίποτα.
-          if [ "$NEW_BASE_URL" == "$CURRENT_BASE_URL" ]; then
-            echo "Referer is already up-to-date. No changes needed."
-            exit 0
-          fi
           
-          echo "Replacing all occurrences of '$CURRENT_BASE_URL' with '$NEW_BASE_URL'..."
-
-          # Η ΚΡΙΣΙΜΗ ΕΝΤΟΛΗ: Απλή αντικατάσταση κειμένου. Ασφαλής και αποτελεσματική.
-          # Χρησιμοποιούμε το | ως διαχωριστικό για να μην έχουμε πρόβλημα με τα / των URLs.
-          sed -i "s|$CURRENT_BASE_URL|$NEW_BASE_URL|g" "$TARGET_FILE"
+          # --- ΟΡΙΣΤΙΚΗ ΑΝΤΙΚΑΤΑΣΤΑΣΗ ---
+          echo "Rebuilding all URL lines in $TARGET_FILE..."
+          
+          # Η ΕΓΓΥΗΜΕΝΗ ΕΝΤΟΛΗ:
+          # Για κάθε γραμμή που τελειώνει σε .m3u8 (με ή χωρίς #... μετά),
+          # ξαναχτίζει το τέλος της γραμμής από την αρχή.
+          # Το (\1) είναι το κομμάτι του URL μέχρι και το .m3u8.
+          sed -i -E "s|^(https?://.*\.m3u8)(#.*)?$|\1#Referer=${NEW_BASE_URL}&Origin=${NEW_BASE_URL}|" "$TARGET_FILE"
           
           echo "File updated successfully."
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: Automate update of Referer/Origin URL'
+          commit_message: 'ci: Automate update of stream URLs'
           commit_user_name: 'GitHub Actions Bot'
           commit_user_email: 'actions@github.com'
           commit_author: 'GitHub Actions Bot <actions@github.com>'
