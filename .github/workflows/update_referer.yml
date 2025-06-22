@@ -1,8 +1,8 @@
-name: Daily Referer & Origin Updater (Browser Emulation)
+name: Daily Referer & Origin Updater (Browser Emulation v2)
 
 on:
   schedule:
-    - cron: '30 5 * * *' # Αλλάχθηκε λίγο για να μην τρέχει ακριβώς την ίδια ώρα με άλλους
+    - cron: '30 5 * * *'
   workflow_dispatch:
 
 jobs:
@@ -12,15 +12,13 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # ΝΕΟ ΒΗΜΑ: Εγκατάσταση του Node.js που απαιτείται για την προσομοίωση browser
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
           node-version: '18'
 
-      # ΤΟ ΚΡΙΣΙΜΟ ΒΗΜΑ: Χρήση browser για την εύρεση του URL
       - name: Fetch new Referer using a headless browser
-        id: fetch_referer # Δίνουμε ένα ID στο βήμα για να πάρουμε το αποτέλεσμά του αργότερα
+        id: fetch_referer # Δίνουμε ID στο βήμα για να πάρουμε το output
         run: |
           SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php"
           echo "Installing Puppeteer..."
@@ -28,45 +26,64 @@ jobs:
           
           echo "Launching browser to fetch dynamic content from $SOURCE_PAGE_URL"
 
-          # Αυτό είναι ένα μικρό Node.js script που χρησιμοποιεί το Puppeteer
-          # για να βρει το Referer και να το στείλει ως "output" του βήματος.
+          # Βελτιωμένο Node.js script
+          # Χρησιμοποιεί page.evaluate για να πάρει το περιεχόμενο, το οποίο είναι πιο αξιόπιστο.
+          # Αγνοεί τα σφάλματα timeout και απλά παίρνει ό,τι έχει φορτώσει.
           NEW_REFERER_URL=$(node -e "
             const puppeteer = require('puppeteer');
             (async () => {
               const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
               const page = await browser.newPage();
               try {
-                await page.goto('${SOURCE_PAGE_URL}', { waitUntil: 'networkidle2', timeout: 30000 });
-                // Περιμένουμε μέχρι το iframe που περιέχει το video player να εμφανιστεί
-                await page.waitForSelector('iframe');
-                const pageContent = await page.content();
-                const match = pageContent.match(/Referer=([^&]+)/);
+                // Πάμε στη σελίδα αλλά δεν περιμένουμε να ολοκληρωθεί πλήρως αν αργεί πολύ.
+                await page.goto('${SOURCE_PAGE_URL}', { timeout: 30000 });
+              } catch (e) {
+                console.warn('Page navigation timed out, but proceeding anyway. This is often okay.');
+              }
+              
+              // Περιμένουμε για το iframe, που είναι το κλειδί.
+              await page.waitForSelector('iframe', { timeout: 15000 });
+              const iframeSrc = await page.evaluate(() => {
+                const iframe = document.querySelector('iframe');
+                return iframe ? iframe.src : null;
+              });
+
+              if (iframeSrc) {
+                const match = iframeSrc.match(/Referer=([^&]+)/);
                 if (match && match[1]) {
                   console.log(match[1]); // Τυπώνουμε το αποτέλεσμα για να το πιάσει η bash
+                } else {
+                  console.error('Iframe found, but Referer pattern did not match.');
                 }
-              } catch (e) {
-                console.error('Error fetching page with Puppeteer:', e.message);
-              } finally {
-                await browser.close();
+              } else {
+                console.error('Could not find the iframe on the page.');
               }
+
+              await browser.close();
             })();
           ")
 
           if [ -z "\$NEW_REFERER_URL" ]; then
-            echo "::error::Could not find new Referer URL even with a browser. The website structure might have changed."
+            echo "::error::Could not extract Referer URL from page."
             exit 1
           fi
 
           echo "Successfully found new Referer: \$NEW_REFERER_URL"
-          # Ορίζουμε το output για να το χρησιμοποιήσουν τα επόμενα βήματα
+          # Ορίζουμε το output για το επόμενο βήμα
           echo "new_referer=\$NEW_REFERER_URL" >> \$GITHUB_OUTPUT
 
-      # Ενημέρωση του αρχείου M3U8 με βάση το αποτέλεσμα του προηγούμενου βήματος
       - name: Update M3U8 file with new Referer
+        # Χρησιμοποιούμε το output του προηγούμενου βήματος
+        env:
+          NEW_REFERER_URL: ${{ steps.fetch_referer.outputs.new_referer }}
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
-          NEW_REFERER_URL="${{ steps.fetch_referer.outputs.new_referer }}"
           
+          if [ -z "\$NEW_REFERER_URL" ]; then
+            echo "::error::New Referer URL is empty. Aborting update."
+            exit 1
+          fi
+
           echo "New Referer to use for update is: \$NEW_REFERER_URL"
           
           CURRENT_REFERER_URL=\$(grep -oP 'Referer=\\K[^&]+' "\$TARGET_FILE" | head -n 1)
@@ -86,11 +103,10 @@ jobs:
           sed -i "s|\$CURRENT_REFERER_URL|\$NEW_REFERER_URL|g" "\$TARGET_FILE"
           echo "File updated successfully."
 
-      # Commit και push των αλλαγών
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: Automate update of Referer/Origin URL (via browser)'
+          commit_message: 'ci: Automate update of Referer/Origin URL'
           commit_user_name: 'GitHub Actions Bot'
           commit_user_email: 'actions@github.com'
           commit_author: 'GitHub Actions Bot <actions@github.com>'
