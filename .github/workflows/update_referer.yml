@@ -1,8 +1,8 @@
-name: Daily Referer & Origin Updater (Final)
+name: Daily Referer & Origin Updater (All-In-One)
 
 on:
   schedule:
-    - cron: '45 5 * * *' # Αλλάζουμε την ώρα για να μην έχουμε θέματα
+    - cron: '15 6 * * *'
   workflow_dispatch:
 
 jobs:
@@ -17,16 +17,15 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Fetch new Referer by extracting Iframe Origin
-        id: fetch_referer
+      - name: Fetch Referer and Update File
         run: |
+          # --- Βήμα 1: Εύρεση του νέου Referer ---
           SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php"
           echo "Installing Puppeteer..."
-          npm i puppeteer
+          npm i puppeteer --silent > /dev/null 2>&1
           
           echo "Launching browser to find the iframe source URL..."
 
-          # Τελικό Node.js script: Βρίσκει το iframe και εξάγει το origin του.
           NEW_REFERER_URL=$(node -e "
             const puppeteer = require('puppeteer');
             (async () => {
@@ -34,73 +33,45 @@ jobs:
               const page = await browser.newPage();
               try {
                 await page.goto('${SOURCE_PAGE_URL}', { waitUntil: 'domcontentloaded', timeout: 30000 });
-              } catch (e) {
-                console.warn('Page navigation may have timed out, but proceeding to find iframe.');
-              }
-              
-              try {
                 await page.waitForSelector('iframe', { timeout: 15000 });
                 const iframeSrc = await page.evaluate(() => document.querySelector('iframe').src);
-
                 if (iframeSrc) {
                   const url = new URL(iframeSrc);
-                  // Εξάγουμε το origin (π.χ. https://allupplay.xyz) και προσθέτουμε την κάθετο
-                  const newReferer = url.origin + '/';
-                  console.log(newReferer); // Αυτό είναι το αποτέλεσμα που θέλουμε!
-                } else {
-                  console.error('Iframe found, but its src attribute is empty.');
+                  console.log(url.origin + '/');
                 }
-              } catch(e) {
-                console.error('Could not find iframe on the page within the time limit.');
+              } catch (e) {
+                // Do nothing, let it return empty
               } finally {
                 await browser.close();
               }
             })();
           ")
 
-          if [ -z "\$NEW_REFERER_URL" ]; then
+          if [ -z "$NEW_REFERER_URL" ]; then
             echo "::error::Could not extract the new Referer/Origin URL."
             exit 1
           fi
 
-          echo "Successfully extracted new Referer/Origin: \$NEW_REFERER_URL"
-          echo "new_referer=\$NEW_REFERER_URL" >> \$GITHUB_OUTPUT
+          echo "Successfully extracted new Referer/Origin: $NEW_REFERER_URL"
 
-      - name: Update M3U8 file with new Referer
-        env:
-          NEW_REFERER_URL: ${{ steps.fetch_referer.outputs.new_referer }}
-        run: |
+          # --- Βήμα 2: Ενημέρωση του αρχείου M3U8 (μέσα στο ίδιο step) ---
           TARGET_FILE="GreekSportsChannels.m3u8"
-          
-          if [ -z "\$NEW_REFERER_URL" ]; then
-            echo "::error::New Referer URL from previous step is empty. Aborting."
-            exit 1
-          fi
+          CURRENT_REFERER_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
 
-          echo "Using new Referer/Origin for update: \$NEW_REFERER_URL"
-          
-          # Χρησιμοποιούμε ένα προσωρινό, ασφαλές διαχωριστικό για το sed
-          DELIMITER=\$(openssl rand -hex 8)
-          
-          # Παίρνουμε τον παλιό referer
-          CURRENT_REFERER_URL=\$(grep -oP 'Referer=\\K[^&]+' "\$TARGET_FILE" | head -n 1)
-
-          if [ -z "\$CURRENT_REFERER_URL" ]; then
+          if [ -z "$CURRENT_REFERER_URL" ]; then
             echo "::warning::No current Referer found. Appending to all links."
-            sed -i -E "s\${DELIMITER}(dokko1new.newkso.ru/dokko1/premium[0-9]+/mono.m3u8)\${DELIMITER}\\1#Referer=\${NEW_REFERER_URL}\\&Origin=\${NEW_REFERER_URL}\${DELIMITER}g" "\$TARGET_FILE"
-            exit 0
+            sed -i -E "s|(dokko1new.newkso.ru/dokko1/premium[0-9]+/mono.m3u8)|\\1#Referer=${NEW_REFERER_URL}\&Origin=${NEW_REFERER_URL}|g" "$TARGET_FILE"
+          elif [ "$NEW_REFERER_URL" != "$CURRENT_REFERER_URL" ]; then
+            echo "Updating all links in $TARGET_FILE"
+            # Χρησιμοποιούμε το # ως διαχωριστικό στο sed για ασφάλεια με τα URL
+            sed -i "s#$CURRENT_REFERER_URL#$NEW_REFERER_URL#g" "$TARGET_FILE"
+            echo "File updated successfully."
+          else
+            echo "Referer is already up-to-date. No changes needed."
           fi
-
-          if [ "\$NEW_REFERER_URL" == "\$CURRENT_REFERER_URL" ]; then
-            echo "Referer is already up-to-date."
-            exit 0
-          fi
-
-          echo "Updating all links in \$TARGET_FILE"
-          sed -i "s\${DELIMITER}\$CURRENT_REFERER_URL\${DELIMITER}\$NEW_REFERER_URL\${DELIMITER}g" "\$TARGET_FILE"
-          echo "File updated successfully."
 
       - name: Commit and push changes
+        if: success() # Τρέχει μόνο αν το προηγούμενο βήμα ήταν επιτυχές
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'ci: Automate update of Referer/Origin URL'
