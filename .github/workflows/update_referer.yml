@@ -1,73 +1,96 @@
-name: Daily Referer & Origin Updater
+name: Daily Referer & Origin Updater (Browser Emulation)
 
 on:
-  # Εκτελείται αυτόματα μία φορά την ημέρα στις 05:00 UTC
   schedule:
-    - cron: '0 5 * * *'
-  # Επιτρέπει τη χειροκίνητη εκτέλεση
+    - cron: '30 5 * * *' # Αλλάχθηκε λίγο για να μην τρέχει ακριβώς την ίδια ώρα με άλλους
   workflow_dispatch:
 
 jobs:
   update-referer:
     runs-on: ubuntu-latest
     steps:
-      # 1. Checkout του κώδικα
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Εύρεση του νέου Referer και αντικατάσταση σε όλο το αρχείο
-      - name: Fetch new Referer and update M3U8 file
+      # ΝΕΟ ΒΗΜΑ: Εγκατάσταση του Node.js που απαιτείται για την προσομοίωση browser
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '18'
+
+      # ΤΟ ΚΡΙΣΙΜΟ ΒΗΜΑ: Χρήση browser για την εύρεση του URL
+      - name: Fetch new Referer using a headless browser
+        id: fetch_referer # Δίνουμε ένα ID στο βήμα για να πάρουμε το αποτέλεσμά του αργότερα
         run: |
-          # Ορισμός μεταβλητών
-          SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php" # Η σελίδα από όπου παίρνουμε το νέο Referer
-          TARGET_FILE="GreekSportsChannels.m3u8"                   # Το αρχείο που θα ενημερώσουμε
-
-          echo "Fetching new Referer/Origin from: $SOURCE_PAGE_URL"
+          SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php"
+          echo "Installing Puppeteer..."
+          npm i puppeteer
           
-          # Βρίσκουμε το νέο Referer. Η εντολή ψάχνει για το κείμενο μετά το Referer= και πριν το &
-          NEW_REFERER_URL=$(curl -sL "$SOURCE_PAGE_URL" | grep -oP 'Referer=\K[^&]+')
+          echo "Launching browser to fetch dynamic content from $SOURCE_PAGE_URL"
 
-          # Έλεγχος αν βρέθηκε νέος Referer
-          if [ -z "$NEW_REFERER_URL" ]; then
-            echo "::error::Could not find a new Referer URL from the source page. Aborting."
+          # Αυτό είναι ένα μικρό Node.js script που χρησιμοποιεί το Puppeteer
+          # για να βρει το Referer και να το στείλει ως "output" του βήματος.
+          NEW_REFERER_URL=$(node -e "
+            const puppeteer = require('puppeteer');
+            (async () => {
+              const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
+              const page = await browser.newPage();
+              try {
+                await page.goto('${SOURCE_PAGE_URL}', { waitUntil: 'networkidle2', timeout: 30000 });
+                // Περιμένουμε μέχρι το iframe που περιέχει το video player να εμφανιστεί
+                await page.waitForSelector('iframe');
+                const pageContent = await page.content();
+                const match = pageContent.match(/Referer=([^&]+)/);
+                if (match && match[1]) {
+                  console.log(match[1]); // Τυπώνουμε το αποτέλεσμα για να το πιάσει η bash
+                }
+              } catch (e) {
+                console.error('Error fetching page with Puppeteer:', e.message);
+              } finally {
+                await browser.close();
+              }
+            })();
+          ")
+
+          if [ -z "\$NEW_REFERER_URL" ]; then
+            echo "::error::Could not find new Referer URL even with a browser. The website structure might have changed."
             exit 1
           fi
 
-          echo "Found new Referer/Origin: $NEW_REFERER_URL"
+          echo "Successfully found new Referer: \$NEW_REFERER_URL"
+          # Ορίζουμε το output για να το χρησιμοποιήσουν τα επόμενα βήματα
+          echo "new_referer=\$NEW_REFERER_URL" >> \$GITHUB_OUTPUT
 
-          # Βρίσκουμε τον ΤΡΕΧΟΝΤΑ (παλιό) Referer από την ΠΡΩΤΗ γραμμή του αρχείου που τον περιέχει
-          CURRENT_REFERER_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
+      # Ενημέρωση του αρχείου M3U8 με βάση το αποτέλεσμα του προηγούμενου βήματος
+      - name: Update M3U8 file with new Referer
+        run: |
+          TARGET_FILE="GreekSportsChannels.m3u8"
+          NEW_REFERER_URL="${{ steps.fetch_referer.outputs.new_referer }}"
+          
+          echo "New Referer to use for update is: \$NEW_REFERER_URL"
+          
+          CURRENT_REFERER_URL=\$(grep -oP 'Referer=\\K[^&]+' "\$TARGET_FILE" | head -n 1)
 
-          # Έλεγχος αν βρέθηκε ο παλιός Referer στο αρχείο μας
-          if [ -z "$CURRENT_REFERER_URL" ]; then
-            echo "::warning::Could not find a current Referer in the file. Will attempt to append."
-            # Αν δεν υπάρχει καθόλου Referer, το προσθέτουμε στο τέλος κάθε γραμμής
-            sed -i -E "s|(dokko1new.newkso.ru/dokko1/premium[0-9]+/mono.m3u8)|\1#Referer=${NEW_REFERER_URL}\&Origin=${NEW_REFERER_URL}|g" "$TARGET_FILE"
-            echo "Appended new Referer/Origin to all matching links."
-            exit 0 # Βγαίνουμε επιτυχώς
-          fi
-
-          echo "Current Referer/Origin in file is: $CURRENT_REFERER_URL"
-
-          # Αν ο νέος είναι ίδιος με τον παλιό, δεν κάνουμε τίποτα
-          if [ "$NEW_REFERER_URL" == "$CURRENT_REFERER_URL" ]; then
-            echo "Referer is already up-to-date. No changes needed."
+          if [ -z "\$CURRENT_REFERER_URL" ]; then
+            echo "::warning::No current Referer found. Appending to all links."
+            sed -i -E "s|(dokko1new.newkso.ru/dokko1/premium[0-9]+/mono.m3u8)|\\1#Referer=\${NEW_REFERER_URL}\\&Origin=\${NEW_REFERER_URL}|g" "\$TARGET_FILE"
             exit 0
           fi
-          
-          # Αντικατάσταση του παλιού Referer/Origin με τον νέο ΣΕ ΟΛΟ το αρχείο
-          echo "Updating all links in: $TARGET_FILE"
-          # Χρησιμοποιούμε το sed για την αντικατάσταση. Το | είναι διαχωριστικό για να μην έχουμε πρόβλημα με τα "/" των URLs.
-          # Η εντολή αυτή βρίσκει τον παλιό referer και τον αλλάζει με τον νέο, παντού.
-          sed -i "s|$CURRENT_REFERER_URL|$NEW_REFERER_URL|g" "$TARGET_FILE"
-          
+
+          if [ "\$NEW_REFERER_URL" == "\$CURRENT_REFERER_URL" ]; then
+            echo "Referer is already up-to-date."
+            exit 0
+          fi
+
+          echo "Updating all links in \$TARGET_FILE"
+          sed -i "s|\$CURRENT_REFERER_URL|\$NEW_REFERER_URL|g" "\$TARGET_FILE"
           echo "File updated successfully."
 
-      # 3. Commit και push των αλλαγών
+      # Commit και push των αλλαγών
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: Automate update of Referer/Origin URL'
+          commit_message: 'ci: Automate update of Referer/Origin URL (via browser)'
           commit_user_name: 'GitHub Actions Bot'
           commit_user_email: 'actions@github.com'
           commit_author: 'GitHub Actions Bot <actions@github.com>'
