@@ -1,8 +1,8 @@
-name: Automatic Referer Updater (Python & Selenium-Wire)
+name: Automatic Referer Updater (Python Script)
 
 on:
   schedule:
-    - cron: '0 9 * * *' # Εκτέλεση μία φορά την ημέρα
+    - cron: '0 10 * * *'
   workflow_dispatch:
 
 jobs:
@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Set up Python 3.10
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
@@ -24,62 +24,15 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install selenium-wire
-          # Εγκατάσταση του Google Chrome
-          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
 
-      - name: Create and run Python script to find Referer
-        id: find_referer # Δίνουμε ID στο βήμα για να πάρουμε το output
+      - name: Run Python script to find the new Referer
+        id: find_referer
         run: |
-          # Δημιουργούμε το Python script δυναμικά
-          cat <<'EOF' > find_referer.py
-import time
-from seleniumwire import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-
-INSPECTION_URL = "https://miztv.top/stream/stream-622.php"
-
-def discover_referer():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
-    
-    driver = webdriver.Chrome(options=chrome_options)
-    
-    try:
-        driver.get(INSPECTION_URL)
-        # Περιμένουμε για το request που περιέχει το .m3u8
-        # Το wait_for_request έχει ενσωματωμένο timeout
-        req = driver.wait_for_request(r'.*?\.m3u8', timeout=30)
-        
-        if req and req.headers.get('Referer'):
-            # Επιστρέφουμε το URL του Referer, βγάζοντας την τελευταία κάθετο αν υπάρχει
-            print(req.headers['Referer'].strip('/'))
-        else:
-            print("ERROR: Referer not found", file=sys.stderr)
-
-    except Exception as e:
-        print(f"ERROR: An exception occurred: {e}", file=sys.stderr)
-    finally:
-        driver.quit()
-
-if __name__ == "__main__":
-    discover_referer()
-EOF
-
-          # Εκτελούμε το script και αποθηκεύουμε το αποτέλεσμα
+          # Εκτελούμε το script και αποθηκεύουμε την έξοδό του
           NEW_REFERER=$(python find_referer.py)
-          
-          if [[ $NEW_REFERER == *"ERROR"* || -z "$NEW_REFERER" ]]; then
-            echo "::error::Failed to find new Referer. Output was: $NEW_REFERER"
-            exit 1
-          fi
-
           echo "Found new Referer: $NEW_REFERER"
-          # Αποθηκεύουμε το αποτέλεσμα για το επόμενο βήμα
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 file
@@ -87,7 +40,7 @@ EOF
           NEW_URL: ${{ steps.find_referer.outputs.new_referer_url }}/
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
-
+          
           # Βρίσκουμε το παλιό URL για να το αντικαταστήσουμε
           OLD_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
 
@@ -106,7 +59,7 @@ EOF
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: Automate update of Referer/Origin URL (via Selenium-Wire)'
+          commit_message: 'ci: Automate update of Referer/Origin URL (via Python)'
           commit_user_name: 'GitHub Actions Bot'
           commit_user_email: 'actions@github.com'
           commit_author: 'GitHub Actions Bot <actions@github.com>'
