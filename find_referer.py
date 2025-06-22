@@ -4,54 +4,54 @@ from seleniumwire import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver.firefox.service import Service as FirefoxService
 
 INSPECTION_URL = "https://miztv.top/stream/stream-622.php"
 
 def discover_referer():
     """
-    Starts a headless Chrome, tries to find the Referer header, 
+    Starts a headless Firefox browser, tries to find the Referer header,
     and has a fallback method if that fails.
     """
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Safari/537.36")
-    
-    driver = webdriver.Chrome(options=chrome_options)
+    options = FirefoxOptions()
+    options.add_argument("-headless")
+    options.add_argument("--window-size=1920,1080")
+    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
+
+    driver = webdriver.Firefox(options=options)
     
     try:
-        print("Navigating to inspection URL...")
+        print(f"Navigating to inspection URL: {INSPECTION_URL}")
         driver.get(INSPECTION_URL)
         
-        # --- ΠΡΟΣΠΑΘΕΙΑ 1: Η μέθοδος με το network request (η προτιμώμενη) ---
+        # --- Method 1: Network Request ---
         try:
             print("Waiting for iframe to be present...")
             WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
             
-            # Μπαίνουμε μέσα στο iframe
+            print("Switching to iframe...")
             driver.switch_to.frame(0)
             
-            # Προσπαθούμε να κάνουμε κλικ στο body του iframe, μήπως ξεκινήσει το stream
             print("Attempting to click inside the iframe to trigger video...")
-            WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.TAG_NAME, "body"))).click()
+            body = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.TAG_NAME, "body")))
+            body.click()
             
-            print("Waiting for .m3u8 network request...")
-            req = driver.wait_for_request(r'.*?\.m3u8', timeout=20)
+            print("Waiting up to 30 seconds for .m3u8 network request...")
+            req = driver.wait_for_request(r'.*?\.m3u8', timeout=30)
             
             if req and req.headers.get('Referer'):
-                print("SUCCESS (Method 1): Found Referer in network request.")
-                print(req.headers['Referer'].strip('/'))
+                referer = req.headers['Referer'].strip('/')
+                print(f"SUCCESS (Method 1): Found Referer in network request: {referer}")
+                print(referer) # This is the final output
                 return
         except Exception as e:
-            print(f"INFO: Method 1 (network request) failed: {e}. Trying fallback method.")
+            print(f"INFO: Method 1 (network request) failed: {e}. Trying fallback.")
 
-        # --- ΠΡΟΣΠΑΘΕΙΑ 2: Μέθοδος Fallback (αν η πρώτη απέτυχε) ---
-        # Επιστρέφουμε στο κυρίως περιεχόμενο της σελίδας
+        # --- Method 2: Fallback to iframe src ---
         driver.switch_to.default_content()
-        
         print("Fallback: Finding iframe source URL...")
+        
         iframe = WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
         iframe_src = iframe.get_attribute('src')
         
@@ -60,10 +60,9 @@ def discover_referer():
             parsed_url = urlparse(iframe_src)
             origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
             print(f"SUCCESS (Method 2): Found Referer from iframe src: {origin}")
-            print(origin)
+            print(origin) # This is the final output
             return
 
-        # Αν φτάσουμε εδώ, τίποτα δεν δούλεψε
         print("ERROR: Both methods failed. Could not determine Referer.", file=sys.stderr)
         sys.exit(1)
 
