@@ -1,8 +1,8 @@
-name: Automatic Referer Updater
+name: Automatic Referer Updater (Firefox - PPA)
 
 on:
   schedule:
-    - cron: '0 11 * * *'
+    - cron: '0 12 * * *'
   workflow_dispatch:
 
 jobs:
@@ -15,52 +15,68 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install Playwright
-        run: npm install playwright
-
-      - name: Install Playwright Browsers
-        run: npx playwright install --with-deps
-
-      - name: Install Python
-        uses: actions/setup-python@v5
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install Python dependencies
-        run: python -m pip install --upgrade pip
+      # --- Η ΣΩΣΤΗ ΜΕΘΟΔΟΣ ΕΓΚΑΤΑΣΤΑΣΗΣ FIREFOX ---
+      - name: Install Firefox (PPA Method)
+        run: |
+          sudo install -d -m 0755 /etc/apt/keyrings
+          wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O- | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc > /dev/null
+          echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" | sudo tee -a /etc/apt/sources.list.d/mozilla.list > /dev/null
+          echo '
+          Package: *
+          Pin: origin packages.mozilla.org
+          Pin-Priority: 1000
+          ' | sudo tee /etc/apt/preferences.d/mozilla
+          sudo apt-get update && sudo apt-get install -y firefox
 
-      - name: Find new Referer with Playwright
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium-wire "blinker<1.8.0"
+
+      - name: Run Python script to find the new Referer
         id: find_referer
         run: |
-          NEW_REFERER=$(node find_referer.js | tail -n 1)
-          if [[ -z "$NEW_REFERER" ]]; then
-            echo "::error::Playwright script failed or returned an empty referer."
-            exit 1
+          # Εκτελούμε το script και αποθηκεύουμε την έξοδό του
+          NEW_REFERER=$(python find_referer.py)
+          
+          if [[ -z "$NEW_REFERER" || "$NEW_REFERER" == *"ERROR"* ]]; then
+             echo "::error:: Python script failed or returned an empty referer."
+             exit 1
           fi
+          
+          echo "Found new Referer: $NEW_REFERER"
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
-      - name: Replace Referer/Origin in m3u8
-        run: python update_referer.py "${{ steps.find_referer.outputs.new_referer_url }}"
-
-      - name: Check for changes
-        id: changes
+      - name: Update M3U8 file
+        env:
+          NEW_URL: ${{ steps.find_referer.outputs.new_referer_url }}/
         run: |
-          if git diff --quiet --exit-code GreekSportsChannels.m3u8; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-          else
-            echo "changed=true" >> $GITHUB_OUTPUT
+          TARGET_FILE="GreekSportsChannels.m3u8"
+          
+          # Βρίσκουμε το παλιό URL για να το αντικαταστήσουμε
+          OLD_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
+
+          if [ -z "$OLD_URL" ]; then
+            echo "::error::Could not find OLD_URL in the file. Nothing to replace."
+            exit 1
           fi
+          
+          echo "Replacing all occurrences of '$OLD_URL' with '$NEW_URL'..."
+          
+          # Απλή και ασφαλής αντικατάσταση
+          sed -i "s|$OLD_URL|$NEW_URL|g" "$TARGET_FILE"
+
+          echo "File updated successfully."
 
       - name: Commit and push changes
-        if: steps.changes.outputs.changed == 'true'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: Automate update of Referer/Origin URL via Playwright'
+          commit_message: 'ci: Automate update of Referer/Origin URL (via Firefox)'
           commit_user_name: 'GitHub Actions Bot'
           commit_user_email: 'actions@github.com'
           commit_author: 'GitHub Actions Bot <actions@github.com>'
