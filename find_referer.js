@@ -4,33 +4,32 @@ const { chromium } = require('playwright');
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
 
-    let referer = null;
+    let found = false;
 
-    // ΠΑΡΑΤΗΡΗΣΗ:
-    // Άλλαξε το inspectionURL αν χρειάζεται (όποια σελίδα φορτώνει το player)
-    const inspectionURL = 'https://miztv.top/stream/stream-622.php';
-
-    // Πιάσε το πρώτο .m3u8 request και πάρε το referer header που στέλνεται
     page.on('request', request => {
-        if (request.url().includes('.m3u8') && !referer) {
-            referer = request.headers()['referer'] || page.url();
-            // Εμφάνισε μόνο το origin (χωρίς path) αν θες:
-            try {
-                const url = new URL(referer);
-                referer = url.origin + '/';
-            } catch (e) {}
-            console.log(referer);
+        if (!found && request.url().includes('.m3u8')) {
+            const headers = request.headers();
+            if (headers['referer'] && headers['origin']) {
+                // Εμφάνισε για να το πάρει το workflow σου
+                console.log('REFERER=' + headers['referer']);
+                console.log('ORIGIN=' + headers['origin']);
+                found = true;
+            }
         }
     });
 
-    // Φόρτωσε τη σελίδα και περίμενε λίγο να ξεκινήσουν τα requests
-    await page.goto(inspectionURL, { waitUntil: "domcontentloaded" });
+    // Άλλαξε εδώ το URL αν αλλάξει σημείο το stream
+    await page.goto('https://miztv.top/stream/stream-622.php', { waitUntil: "domcontentloaded" });
+
+    // Αν απαιτείται click για να ξεκινήσει το stream, κάνε το:
+    // await page.click('button ή selector που ξεκινά το player');
+
     await page.waitForTimeout(10000);
 
     await browser.close();
 
-    if (!referer) {
-        console.error('ERROR: Did not detect referer!');
+    if (!found) {
+        console.error('ERROR: Did not detect referer/origin!');
         process.exit(1);
     }
 })();
