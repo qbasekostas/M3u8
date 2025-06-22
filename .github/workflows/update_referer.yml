@@ -22,13 +22,13 @@ jobs:
 
       - name: Install Firefox and GeckoDriver
         run: |
-          sudo apt-get update
-          sudo apt-get install -y firefox
-          GECKODRIVER_VERSION=$(curl -s https://api.github.com/repos/mozilla/geckodriver/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
-          wget "https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
-          tar -xzf "geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
-          chmod +x geckodriver
-          sudo mv geckodriver /usr/local/bin/
+         sudo apt-get update
+         sudo apt-get install -y firefox
+         GECKODRIVER_VERSION="v0.36.0"
+         wget "https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
+         tar -xzf "geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
+         chmod +x geckodriver
+         sudo mv geckodriver /usr/local/bin/
 
       - name: Check Firefox version
         run: firefox --version
