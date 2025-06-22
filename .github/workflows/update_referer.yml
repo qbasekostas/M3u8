@@ -24,6 +24,11 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y firefox
+          GECKODRIVER_VERSION=$(curl -s https://api.github.com/repos/mozilla/geckodriver/releases/latest | grep '"tag_name":' | sed -E 's/.*"([^"]+)".*/\1/')
+          wget "https://github.com/mozilla/geckodriver/releases/download/$GECKODRIVER_VERSION/geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
+          tar -xzf "geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
+          chmod +x geckodriver
+          sudo mv geckodriver /usr/local/bin/
 
       - name: Install Python Dependencies
         run: |
@@ -33,39 +38,35 @@ jobs:
       - name: Run Python script to find the new Referer
         id: find_referer
         run: |
-          # Εκτελούμε το script και αποθηκεύουμε την έξοδό του
-          NEW_REFERER=$(python find_referer.py)
-          
+          NEW_REFERER=$(python find_referer.py | tail -n 1)
           if [[ -z "$NEW_REFERER" || "$NEW_REFERER" == *"ERROR"* ]]; then
              echo "::error:: Python script failed or returned an empty referer."
              exit 1
           fi
-          
           echo "Found new Referer: $NEW_REFERER"
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 file
         env:
-          NEW_URL: ${{ steps.find_referer.outputs.new_referer_url }}/
+          NEW_URL: ${{ steps.find_referer.outputs.new_referer_url }}
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
-          
-          # Βρίσκουμε το παλιό URL για να το αντικαταστήσουμε
           OLD_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
-
           if [ -z "$OLD_URL" ]; then
             echo "::error::Could not find OLD_URL in the file. Nothing to replace."
             exit 1
           fi
-          
           echo "Replacing all occurrences of '$OLD_URL' with '$NEW_URL'..."
-          
-          # Απλή και ασφαλής αντικατάσταση
           sed -i "s|$OLD_URL|$NEW_URL|g" "$TARGET_FILE"
-
           echo "File updated successfully."
 
       - name: Commit and push changes
+        run: |
+          if git diff --quiet --exit-code GreekSportsChannels.m3u8; then
+            echo "No changes to commit."
+            exit 0
+          fi
+        # only commit if file changed
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: 'ci: Automate update of Referer/Origin URL (via Firefox)'
