@@ -1,8 +1,8 @@
-name: Automatic Referer Updater (Firefox - PPA)
+name: Automatic Referer Updater (Final Attempt)
 
 on:
   schedule:
-    - cron: '0 12 * * *'
+    - cron: '0 13 * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,7 +20,6 @@ jobs:
         with:
           python-version: '3.10'
 
-      # --- Η ΣΩΣΤΗ ΜΕΘΟΔΟΣ ΕΓΚΑΤΑΣΤΑΣΗΣ FIREFOX ---
       - name: Install Firefox (PPA Method)
         run: |
           sudo install -d -m 0755 /etc/apt/keyrings
@@ -41,15 +40,8 @@ jobs:
       - name: Run Python script to find the new Referer
         id: find_referer
         run: |
-          # Εκτελούμε το script και αποθηκεύουμε την έξοδό του
+          # Το script τώρα θα επιστρέψει ΜΟΝΟ το URL ή θα αποτύχει.
           NEW_REFERER=$(python find_referer.py)
-          
-          if [[ -z "$NEW_REFERER" || "$NEW_REFERER" == *"ERROR"* ]]; then
-             echo "::error:: Python script failed or returned an empty referer."
-             exit 1
-          fi
-          
-          echo "Found new Referer: $NEW_REFERER"
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 file
@@ -58,7 +50,6 @@ jobs:
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
           
-          # Βρίσκουμε το παλιό URL για να το αντικαταστήσουμε
           OLD_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
 
           if [ -z "$OLD_URL" ]; then
@@ -66,11 +57,13 @@ jobs:
             exit 1
           fi
           
-          echo "Replacing all occurrences of '$OLD_URL' with '$NEW_URL'..."
-          
-          # Απλή και ασφαλής αντικατάσταση
-          sed -i "s|$OLD_URL|$NEW_URL|g" "$TARGET_FILE"
+          if [ "$OLD_URL" == "$NEW_URL" ]; then
+            echo "URL is already up-to-date. No changes needed."
+            exit 0
+          fi
 
+          echo "Replacing all occurrences of '$OLD_URL' with '$NEW_URL'..."
+          sed -i "s|$OLD_URL|$NEW_URL|g" "$TARGET_FILE"
           echo "File updated successfully."
 
       - name: Commit and push changes
