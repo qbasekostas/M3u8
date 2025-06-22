@@ -23,7 +23,7 @@ jobs:
       - name: Install dependencies (Selenium-Wire & Chrome)
         run: |
           python -m pip install --upgrade pip
-          pip install selenium-wire
+          pip install selenium-wire "blinker<1.8.0"
           wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
           sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
 
