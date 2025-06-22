@@ -30,6 +30,9 @@ jobs:
           chmod +x geckodriver
           sudo mv geckodriver /usr/local/bin/
 
+      - name: Check Firefox version
+        run: firefox --version
+
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
