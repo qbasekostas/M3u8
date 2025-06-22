@@ -6,11 +6,13 @@ const { chromium } = require('playwright');
 
     let found = false;
 
+    // Πιάσε όλα τα requests στη σελίδα
     page.on('request', request => {
-        if (!found && request.url().includes('.m3u8')) {
+        const url = request.url();
+        if (!found && url.endsWith('.m3u8')) {
             const headers = request.headers();
             if (headers['referer'] && headers['origin']) {
-                // Εμφάνισε για να το πάρει το workflow σου
+                // Εκτυπώνει και τα δύο για το GitHub Actions/Workflow σου
                 console.log('REFERER=' + headers['referer']);
                 console.log('ORIGIN=' + headers['origin']);
                 found = true;
@@ -18,13 +20,22 @@ const { chromium } = require('playwright');
         }
     });
 
-    // Άλλαξε εδώ το URL αν αλλάξει σημείο το stream
+    // Βήμα 1: Άνοιξε τη σελίδα
     await page.goto('https://miztv.top/stream/stream-622.php', { waitUntil: "domcontentloaded" });
 
-    // Αν απαιτείται click για να ξεκινήσει το stream, κάνε το:
-    // await page.click('button ή selector που ξεκινά το player');
+    // Βήμα 2: Περίμενε να φορτώσει το iframe
+    const iframeElement = await page.waitForSelector('iframe', {timeout: 15000});
+    const frame = await iframeElement.contentFrame();
 
-    await page.waitForTimeout(10000);
+    // Βήμα 3: Προσπάθησε να κάνεις click στο play/unmute αν υπάρχει κουμπί (προσαρμόζεις το selector)
+    try {
+        await frame.click('button, .vjs-big-play-button, .clappr-play-pause-button', {timeout: 5000});
+    } catch (e) {
+        // Αν δεν υπάρχει κουμπί, συνέχισε
+    }
+
+    // Βήμα 4: Περίμενε να γίνουν τα requests
+    await page.waitForTimeout(10000); // 10 δευτερόλεπτα
 
     await browser.close();
 
