@@ -15,7 +15,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Firefox (APT, not snap)
+      - name: Install Firefox (APT)
         run: |
           sudo apt-get update
           sudo apt-get install -y firefox
@@ -27,9 +27,6 @@ jobs:
           tar -xzf "geckodriver-$GECKODRIVER_VERSION-linux64.tar.gz"
           chmod +x geckodriver
           sudo mv geckodriver /usr/local/bin/
-
-      - name: Check Firefox version
-        run: firefox --version
 
       - name: Set up Python 3.10
         uses: actions/setup-python@v4
@@ -52,19 +49,11 @@ jobs:
           echo "Found new Referer: $NEW_REFERER"
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
-      - name: Update M3U8 file
+      - name: Replace Referer/Origin in m3u8
         env:
           NEW_URL: ${{ steps.find_referer.outputs.new_referer_url }}
         run: |
-          TARGET_FILE="GreekSportsChannels.m3u8"
-          OLD_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
-          if [ -z "$OLD_URL" ]; then
-            echo "::error::Could not find OLD_URL in the file. Nothing to replace."
-            exit 1
-          fi
-          echo "Replacing all occurrences of '$OLD_URL' with '$NEW_URL'..."
-          sed -i "s|$OLD_URL|$NEW_URL|g" "$TARGET_FILE"
-          echo "File updated successfully."
+          python update_referer.py "$NEW_URL"
 
       - name: Check for changes
         id: changes
