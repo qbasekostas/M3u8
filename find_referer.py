@@ -5,35 +5,32 @@ from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
+from selenium.webdriver import FirefoxProfile
 
 INSPECTION_URL = "https://miztv.top/stream/stream-622.php"
 FIREFOX_BINARY_PATH = '/usr/bin/firefox' # Η διαδρομή για το εκτελέσιμο του Firefox
 
 def discover_referer():
-    """
-    Starts a headless Firefox browser, specifying the binary location,
-    and tries to find the Referer header.
-    """
     options = FirefoxOptions()
     options.add_argument("-headless")
     options.add_argument("--window-size=1920,1080")
-    # ΟΡΙΖΟΥΜΕ ΡΗΤΑ ΤΗ ΔΙΑΔΡΟΜΗ ΤΟΥ FIREFOX
     options.binary_location = FIREFOX_BINARY_PATH
-    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
+    
+    profile = FirefoxProfile()
+    profile.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
 
-    driver = webdriver.Firefox(options=options)
+    driver = webdriver.Firefox(options=options, firefox_profile=profile)
     
     try:
         print(f"Navigating to inspection URL: {INSPECTION_URL}")
         driver.get(INSPECTION_URL)
         
-        # --- Method 1: Network Request ---
         try:
             print("Waiting for iframe to be present...")
-            WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
+            iframe = WebDriverWait(driver, 15).until(EC.presence_of_element_located((By.TAG_NAME, "iframe")))
             
             print("Switching to iframe...")
-            driver.switch_to.frame(0)
+            driver.switch_to.frame(iframe)
             
             print("Attempting to click inside the iframe to trigger video...")
             body = WebDriverWait(driver, 10).until(EC.element_to_be_clickable((By.TAG_NAME, "body")))
@@ -48,9 +45,9 @@ def discover_referer():
                 print(referer)
                 return
         except Exception as e:
-            print(f"INFO: Method 1 (network request) failed: {e}. Trying fallback.")
+            import traceback
+            print(f"INFO: Method 1 (network request) failed: {e}\n{traceback.format_exc()}\nTrying fallback.")
 
-        # --- Method 2: Fallback to iframe src ---
         driver.switch_to.default_content()
         print("Fallback: Finding iframe source URL...")
         
@@ -69,7 +66,8 @@ def discover_referer():
         sys.exit(1)
 
     except Exception as e:
-        print(f"ERROR: A critical exception occurred: {e}", file=sys.stderr)
+        import traceback
+        print(f"ERROR: A critical exception occurred: {e}\n{traceback.format_exc()}", file=sys.stderr)
         sys.exit(1)
     finally:
         driver.quit()
