@@ -1,77 +1,112 @@
-name: Daily URL Updater (Guaranteed to Work)
+name: Automatic Referer Updater (Python & Selenium-Wire)
 
 on:
   schedule:
-    - cron: '0 8 * * *' # Εκτέλεση μία φορά την ημέρα
-  workflow_dispatch: # Για χειροκίνητη εκτέλεση
+    - cron: '0 9 * * *' # Εκτέλεση μία φορά την ημέρα
+  workflow_dispatch:
 
 jobs:
-  update-urls:
+  update-referer:
     runs-on: ubuntu-latest
     permissions:
-      contents: write # Απαραίτητο για να μπορεί το Action να κάνει commit
+      contents: write
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v3
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          node-version: '18'
+          python-version: '3.10'
 
-      - name: Fetch New URL and Rebuild M3U8 File
+      - name: Install dependencies (Selenium-Wire & Chrome)
+        run: |
+          python -m pip install --upgrade pip
+          pip install selenium-wire
+          # Εγκατάσταση του Google Chrome
+          wget https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
+          sudo dpkg -i google-chrome-stable_current_amd64.deb || sudo apt-get -f install -y
+
+      - name: Create and run Python script to find Referer
+        id: find_referer # Δίνουμε ID στο βήμα για να πάρουμε το output
+        run: |
+          # Δημιουργούμε το Python script δυναμικά
+          cat <<'EOF' > find_referer.py
+import time
+from seleniumwire import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+
+INSPECTION_URL = "https://miztv.top/stream/stream-622.php"
+
+def discover_referer():
+    chrome_options = Options()
+    chrome_options.add_argument("--headless")
+    chrome_options.add_argument("--no-sandbox")
+    chrome_options.add_argument("--disable-dev-shm-usage")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/108.0.0.0 Safari/537.36")
+    
+    driver = webdriver.Chrome(options=chrome_options)
+    
+    try:
+        driver.get(INSPECTION_URL)
+        # Περιμένουμε για το request που περιέχει το .m3u8
+        # Το wait_for_request έχει ενσωματωμένο timeout
+        req = driver.wait_for_request(r'.*?\.m3u8', timeout=30)
+        
+        if req and req.headers.get('Referer'):
+            # Επιστρέφουμε το URL του Referer, βγάζοντας την τελευταία κάθετο αν υπάρχει
+            print(req.headers['Referer'].strip('/'))
+        else:
+            print("ERROR: Referer not found", file=sys.stderr)
+
+    except Exception as e:
+        print(f"ERROR: An exception occurred: {e}", file=sys.stderr)
+    finally:
+        driver.quit()
+
+if __name__ == "__main__":
+    discover_referer()
+EOF
+
+          # Εκτελούμε το script και αποθηκεύουμε το αποτέλεσμα
+          NEW_REFERER=$(python find_referer.py)
+          
+          if [[ $NEW_REFERER == *"ERROR"* || -z "$NEW_REFERER" ]]; then
+            echo "::error::Failed to find new Referer. Output was: $NEW_REFERER"
+            exit 1
+          fi
+
+          echo "Found new Referer: $NEW_REFERER"
+          # Αποθηκεύουμε το αποτέλεσμα για το επόμενο βήμα
+          echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
+
+      - name: Update M3U8 file
+        env:
+          NEW_URL: ${{ steps.find_referer.outputs.new_referer_url }}/
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
 
-          # --- Εύρεση του Νέου URL-Βάση ---
-          SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php"
-          echo "Installing Puppeteer..."
-          npm i puppeteer --silent > /dev/null 2>&1
-          
-          echo "Launching browser to find the new base URL..."
-          NEW_BASE_URL=$(node -e "
-            const puppeteer = require('puppeteer');
-            (async () => {
-              const browser = await puppeteer.launch({ args: ['--no-sandbox', '--disable-setuid-sandbox'] });
-              const page = await browser.newPage();
-              try {
-                await page.goto('${SOURCE_PAGE_URL}', { waitUntil: 'domcontentloaded', timeout: 30000 });
-                await page.waitForSelector('iframe', { timeout: 15000 });
-                const iframeSrc = await page.evaluate(() => document.querySelector('iframe').src);
-                if (iframeSrc) {
-                  const url = new URL(iframeSrc);
-                  console.log(url.origin + '/');
-                }
-              } catch (e) {
-                // Return empty on failure
-              } finally {
-                await browser.close();
-              }
-            })();
-          ")
+          # Βρίσκουμε το παλιό URL για να το αντικαταστήσουμε
+          OLD_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
 
-          if [ -z "$NEW_BASE_URL" ]; then
-            echo "::error::Could not extract the new Referer/Origin URL from the source page."
+          if [ -z "$OLD_URL" ]; then
+            echo "::error::Could not find OLD_URL in the file. Nothing to replace."
             exit 1
           fi
-          echo "Successfully found new base URL: $NEW_BASE_URL"
           
-          # --- ΟΡΙΣΤΙΚΗ ΑΝΤΙΚΑΤΑΣΤΑΣΗ ---
-          echo "Rebuilding all URL lines in $TARGET_FILE..."
+          echo "Replacing all occurrences of '$OLD_URL' with '$NEW_URL'..."
           
-          # Η ΕΓΓΥΗΜΕΝΗ ΕΝΤΟΛΗ:
-          # Για κάθε γραμμή που τελειώνει σε .m3u8 (με ή χωρίς #... μετά),
-          # ξαναχτίζει το τέλος της γραμμής από την αρχή.
-          # Το (\1) είναι το κομμάτι του URL μέχρι και το .m3u8.
-          sed -i -E "s|^(https?://.*\.m3u8)(#.*)?$|\1#Referer=${NEW_BASE_URL}&Origin=${NEW_BASE_URL}|" "$TARGET_FILE"
-          
+          # Απλή και ασφαλής αντικατάσταση
+          sed -i "s|$OLD_URL|$NEW_URL|g" "$TARGET_FILE"
+
           echo "File updated successfully."
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: Automate update of stream URLs'
+          commit_message: 'ci: Automate update of Referer/Origin URL (via Selenium-Wire)'
           commit_user_name: 'GitHub Actions Bot'
           commit_user_email: 'actions@github.com'
           commit_author: 'GitHub Actions Bot <actions@github.com>'
