@@ -1,9 +1,9 @@
-name: Daily Referer & Origin Updater (Correct Logic)
+name: Daily Referer & Origin Updater (Correct Final Logic)
 
 on:
   schedule:
-    - cron: '30 6 * * *'
-  workflow_dispatch:
+    - cron: '0 7 * * *' # Εκτέλεση μία φορά την ημέρα
+  workflow_dispatch: # Για χειροκίνητη εκτέλεση
 
 jobs:
   update-referer:
@@ -20,14 +20,16 @@ jobs:
         with:
           node-version: '18'
 
-      - name: Fetch Referer and Update File
+      - name: Fetch and Update
         run: |
-          # --- Βήμα 1: Εύρεση του νέου URL-βάση ---
+          TARGET_FILE="GreekSportsChannels.m3u8"
+
+          # --- Βήμα 1: Εύρεση του ΝΕΟΥ URL ---
           SOURCE_PAGE_URL="https://miztv.top/stream/stream-622.php"
           echo "Installing Puppeteer..."
           npm i puppeteer --silent > /dev/null 2>&1
           
-          echo "Launching browser to find the iframe source URL..."
+          echo "Launching browser to find the new base URL..."
           NEW_BASE_URL=$(node -e "
             const puppeteer = require('puppeteer');
             (async () => {
@@ -39,7 +41,7 @@ jobs:
                 const iframeSrc = await page.evaluate(() => document.querySelector('iframe').src);
                 if (iframeSrc) {
                   const url = new URL(iframeSrc);
-                  console.log(url.origin + '/'); // Επιστρέφει π.χ. https://allupplay.xyz/
+                  console.log(url.origin + '/'); // Επιστρέφει το νέο URL, π.χ. https://alldownplay.xyz/
                 }
               } catch (e) {
                 // Αποτυχία σημαίνει ότι θα επιστρέψει κενό string
@@ -50,25 +52,35 @@ jobs:
           ")
 
           if [ -z "$NEW_BASE_URL" ]; then
-            echo "::error::Could not extract the new Referer/Origin URL."
+            echo "::error::Could not extract the new Referer/Origin URL from the source page."
             exit 1
           fi
+          echo "Successfully found new base URL: $NEW_BASE_URL"
 
-          echo "Successfully extracted new base URL: $NEW_BASE_URL"
+          # --- Βήμα 2: Εύρεση του ΠΑΛΙΟΥ URL από το αρχείο ---
+          # Η εντολή αυτή βρίσκει το πρώτο URL που υπάρχει στο αρχείο μετά το "Referer="
+          CURRENT_BASE_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
 
-          # --- Βήμα 2: Απλή και ισχυρή αντικατάσταση ---
-          TARGET_FILE="GreekSportsChannels.m3u8"
+          if [ -z "$CURRENT_BASE_URL" ]; then
+            echo "::error::Could not find a current Referer URL in the file to replace. Nothing to do."
+            exit 1
+          fi
+          echo "Found current base URL to replace: $CURRENT_BASE_URL"
+
+          # --- Βήμα 3: Έλεγχος και Αντικατάσταση ---
+          # Αν το παλιό και το νέο URL είναι ίδια, δεν κάνουμε τίποτα.
+          if [ "$NEW_BASE_URL" == "$CURRENT_BASE_URL" ]; then
+            echo "Referer is already up-to-date. No changes needed."
+            exit 0
+          fi
           
-          echo "Updating all links in $TARGET_FILE to use the new Referer/Origin."
+          echo "Replacing all occurrences of '$CURRENT_BASE_URL' with '$NEW_BASE_URL'..."
 
-          # Αυτή η εντολή sed κάνει όλη τη μαγεία:
-          # Βρίσκει κάθε γραμμή που περιέχει το βασικό μοτίβο του URL...
-          # ...και αντικαθιστά τα πάντα από το # και μετά με το νέο, σωστό Referer & Origin.
-          # Αν δεν υπάρχει #, το προσθέτει.
-          sed -i -E "s|(#.*)?$|#Referer=${NEW_BASE_URL}&Origin=${NEW_BASE_URL}|" "$TARGET_FILE"
-
+          # Η ΚΡΙΣΙΜΗ ΕΝΤΟΛΗ: Απλή αντικατάσταση κειμένου. Ασφαλής και αποτελεσματική.
+          # Χρησιμοποιούμε το | ως διαχωριστικό για να μην έχουμε πρόβλημα με τα / των URLs.
+          sed -i "s|$CURRENT_BASE_URL|$NEW_BASE_URL|g" "$TARGET_FILE"
+          
           echo "File updated successfully."
-
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
