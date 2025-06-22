@@ -1,0 +1,70 @@
+name: Daily Referer & Origin Updater
+
+on:
+  # Εκτελείται αυτόματα μία φορά την ημέρα στις 05:00 UTC (08:00 ώρα Ελλάδας το καλοκαίρι)
+  schedule:
+    - cron: '0 5 * * *'
+  # Επιτρέπει τη χειροκίνητη εκτέλεση από την καρτέλα "Actions" του GitHub
+  workflow_dispatch:
+
+jobs:
+  update-links:
+    runs-on: ubuntu-latest
+    steps:
+      # 1. Κάνει checkout τον κώδικα του αποθετηρίου για να μπορέσουμε να τον επεξεργαστούμε
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Το βασικό βήμα: Λήψη, Εύρεση και Αντικατάσταση
+      - name: Fetch new Referer and update M3U8 file
+        run: |
+          # Ορισμός μεταβλητών για ευκολία
+          PAGE_URL="https://miztv.top/stream/stream-622.php"
+          TARGET_FILE="GreekSportsChannels.m3u8" # Το αρχείο που θέλουμε να αλλάξουμε
+          
+          echo "Fetching content from $PAGE_URL..."
+          # Κατεβάζουμε το περιεχόμενο της σελίδας και ψάχνουμε για το URL που περιέχει το "Referer"
+          # Η εντολή grep -oP 'Referer=\K[^&]+' βρίσκει το κείμενο μετά το "Referer=" και μέχρι το επόμενο "&"
+          NEW_REFERER=$(curl -s "$PAGE_URL" | grep -oP 'Referer=\K[^&]+')
+          
+          # Έλεγχος αν βρέθηκε νέος Referer
+          if [ -z "$NEW_REFERER" ]; then
+            echo "::error::Could not find a new Referer URL. Aborting."
+            exit 1
+          fi
+          
+          echo "Found new Referer/Origin URL: $NEW_REFERER"
+          
+          # Βρίσκουμε τον τρέχοντα (παλιό) Referer από το αρχείο μας για να τον αντικαταστήσουμε
+          # Παίρνουμε την πρώτη γραμμή που ταιριάζει
+          CURRENT_REFERER=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
+          
+          if [ -z "$CURRENT_REFERER" ]; then
+            echo "::error::Could not find current Referer in $TARGET_FILE. Aborting."
+            exit 1
+          fi
+
+          echo "Current Referer/Origin in file is: $CURRENT_REFERER"
+          
+          # Αν ο νέος Referer είναι ίδιος με τον παλιό, δεν κάνουμε τίποτα
+          if [ "$NEW_REFERER" == "$CURRENT_REFERER" ]; then
+            echo "Referer is already up-to-date. No changes needed."
+            exit 0
+          fi
+          
+          # Αντικατάσταση του παλιού Referer/Origin με τον νέο σε όλο το αρχείο
+          echo "Updating file: $TARGET_FILE"
+          # Χρησιμοποιούμε το sed για την αντικατάσταση. Το | χρησιμοποιείται ως διαχωριστικό για να μην έχουμε πρόβλημα με τα "/" των URLs.
+          sed -i "s|$CURRENT_REFERER|$NEW_REFERER|g" "$TARGET_FILE"
+          
+          echo "File updated successfully."
+
+      # 3. Κάνει commit και push τις αλλαγές αυτόματα στο repository
+      - name: Commit and push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: 'ci: Automate update of Referer/Origin URL'
+          commit_user_name: 'GitHub Actions Bot'
+          commit_user_email: 'actions@github.com'
+          commit_author: 'GitHub Actions Bot <actions@github.com>'
+          file_pattern: 'GreekSportsChannels.m3u8' # Κάνει commit μόνο αν αυτό το αρχείο έχει αλλάξει
