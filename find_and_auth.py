@@ -1,107 +1,80 @@
 import sys
 import re
 import requests
-from selenium.webdriver import Firefox
-from selenium.webdriver.common.by import By
-from selenium.webdriver.firefox.options import Options as FirefoxOptions
-# Επαναφέρουμε το Service
-from selenium.webdriver.firefox.service import Service as FirefoxService
-from selenium.webdriver.support.ui import WebDriverWait
 from urllib.parse import urlparse
 
-# --- Ρυθμίσεις ---
-MIZTV_URL = "https://miztv.top/stream/stream-622.php"
-FIREFOX_BINARY_PATH = '/usr/bin/firefox'
-# Ο GeckoDriver τώρα βρίσκεται εδώ, όπως τον βάλαμε με το workflow
-GECKODRIVER_PATH = '/usr/local/bin/geckodriver'
+# --- ΛΙΣΤΑ ΠΙΘΑΝΩΝ DOMAINS ΤΟΥ PLAYER ---
+# Αυτή η λίστα είναι το κλειδί. Μπορούμε να την επεκτείνουμε στο μέλλον.
+PLAYER_DOMAINS = [
+    "https://allupplay.xyz",
+    "https://streambtw.com",
+    "https://liveon.sx",
+    "https://tinyurl.is", # Προσθήκη από άλλα παρόμοια projects
+    "https://ourplayer.xyz", # Προσθήκη από άλλα παρόμοια projects
+]
 
-class iframe_src_is_http:
-    """Περιμένει μέχρι το src του iframe να αρχίζει με 'http'."""
-    def __init__(self, locator):
-        self.locator = locator
-    def __call__(self, driver):
+def find_working_domain_and_get_referer():
+    """
+    Δοκιμάζει ένα-ένα τα domains ΜΟΝΟ με requests, χωρίς browser,
+    μέχρι να βρει ένα που λειτουργεί.
+    """
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
+    })
+
+    for domain in PLAYER_DOMAINS:
         try:
-            src = driver.find_element(*self.locator).get_attribute('src')
-            if src and src.startswith('http'):
-                return src
-            return False
-        except:
-            return False
+            print(f"Testing domain: {domain} ...", file=sys.stderr)
+            
+            # ΒΗΜΑ 1: Πάρε το token από το embed.php
+            embed_url = f"{domain}/embed.php?id=stream-622"
+            # Προσθέτουμε ένα header Referer που δείχνει στο miztv, για να μοιάζει πιο "νόμιμο"
+            embed_content = session.get(embed_url, headers={'Referer': 'https://miztv.top/'}, timeout=15).text
+            token_match = re.search(r'"token":\s*"([^"]+)"', embed_content)
+            
+            if not token_match:
+                print(f"  -> No token found. Skipping.", file=sys.stderr)
+                continue
+            
+            token = token_match.group(1)
 
-def find_final_referer():
-    options = FirefoxOptions()
-    options.add_argument("-headless")
-    options.binary_location = FIREFOX_BINARY_PATH
-    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
+            # ΒΗΜΑ 2: Κάλεσε το get.php API
+            api_url = f"{domain}/get.php"
+            api_headers = {'Referer': embed_url, 'X-Requested-With': 'XMLHttpRequest'}
+            api_data = {'id': 'stream-622', 'token': token}
+            
+            api_response = session.post(api_url, headers=api_headers, data=api_data, timeout=15).json()
+            final_stream_url = api_response.get('url')
+            
+            if not final_stream_url:
+                print(f"  -> API response has no 'url'. Skipping.", file=sys.stderr)
+                continue
 
-    # --- ΕΠΑΝΑΦΕΡΟΥΜΕ ΤΟ SERVICE ---
-    service = FirefoxService(executable_path=GECKODRIVER_PATH)
+            # ΒΗΜΑ 3: Βρες το Auth URL και εξουσιοδότησε
+            auth_url_match = re.search(r'(https?://.*?/auth\.php\?.*?)(?:#|$)', final_stream_url)
+            if not auth_url_match:
+                print(f"  -> Could not find auth.php URL. Skipping.", file=sys.stderr)
+                continue
 
-    driver = None
-    player_domain = None
+            auth_url = auth_url_match.group(1)
+            
+            session.get(auth_url, timeout=15).raise_for_status()
+            
+            # ΒΗΜΑ 4: Εξαγωγή του νέου Referer
+            new_referer_domain = f"{urlparse(auth_url).scheme}://{urlparse(auth_url).netloc}/"
+            
+            print(f"SUCCESS! Found working domain '{domain}' and new Referer '{new_referer_domain}'", file=sys.stderr)
+            print(new_referer_domain) # Τυπώνουμε το τελικό αποτέλεσμα και τελειώνουμε
+            return
+
+        except Exception as e:
+            print(f"  -> Domain '{domain}' failed: {e}. Trying next.", file=sys.stderr)
+            continue
     
-    try:
-        # Περνάμε ξανά το service στην αρχικοποίηση του driver
-        driver = Firefox(options=options, service=service)
-        driver.get(MIZTV_URL)
-        
-        print("Waiting for iframe to get a valid HTTP source...", file=sys.stderr)
-        iframe_url = WebDriverWait(driver, 40).until(
-            iframe_src_is_http((By.TAG_NAME, "iframe"))
-        )
-        
-        player_domain = f"{urlparse(iframe_url).scheme}://{urlparse(iframe_url).netloc}"
-        print(f"Found Player Domain: {player_domain}", file=sys.stderr)
-        
-    except Exception as e:
-        print(f"ERROR during DOM observation phase: {e}", file=sys.stderr)
-        if driver:
-            driver.quit()
-        sys.exit(1)
-    finally:
-        if driver:
-            driver.quit()
-
-    try:
-        embed_url_for_api = f"{player_domain}/embed.php?id=stream-622"
-        
-        embed_page_content = requests.get(embed_url_for_api).text
-        token_match = re.search(r'"token":\s*"([^"]+)"', embed_page_content)
-        
-        if not token_match:
-            raise Exception("Could not find token on the embed page.")
-                
-        token = token_match.group(1)
-        print(f"Found Token: {token}", file=sys.stderr)
-        
-        get_php_url = f"{player_domain}/get.php"
-        headers = {'Referer': embed_url_for_api, 'X-Requested-With': 'XMLHttpRequest'}
-        data = {'id': 'stream-622', 'token': token}
-        
-        api_response_json = requests.post(get_php_url, headers=headers, data=data).json()
-        final_stream_url = api_response_json.get('url')
-        
-        if not final_stream_url:
-             raise Exception("API response did not contain a 'url' key.")
-
-        auth_url_match = re.search(r'(https?://.*?/auth\.php\?.*?)\#', final_stream_url)
-        if not auth_url_match:
-            raise Exception("Could not find the auth.php URL in the final stream URL.")
-        
-        auth_url = auth_url_match.group(1)
-        print(f"Found Auth URL: {auth_url}", file=sys.stderr)
-        
-        requests.get(auth_url).raise_for_status()
-        print("Successfully visited Auth URL. IP is now authorized.", file=sys.stderr)
-
-        new_referer_domain = f"{urlparse(auth_url).scheme}://{urlparse(auth_url).netloc}/"
-        
-        print(f"SUCCESS: The new Referer is: {new_referer_domain}", file=sys.stderr)
-        print(new_referer_domain)
-
-    except Exception as e:
-        print(f"ERROR during API call phase: {e}", file=sys.stderr)
-        sys.exit(1)
+    # Αν φτάσουμε εδώ, κανένα domain δεν λειτούργησε
+    print("FATAL ERROR: None of the provided player domains are working.", file=sys.stderr)
+    sys.exit(1)
 
 if __name__ == "__main__":
-    find_final_referer()
+    find_working_domain_and_get_referer()
