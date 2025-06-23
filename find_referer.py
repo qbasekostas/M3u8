@@ -1,69 +1,54 @@
 import sys
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.common.by import By
+import time
+from seleniumwire import webdriver
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
-from selenium.webdriver import Firefox
-from urllib.parse import urlparse
 
-# --- Ρυθμίσεις ---
+# --- Ρυθμίσεις για το GitHub Action ---
 INSPECTION_URL = "https://miztv.top/stream/stream-622.php"
 FIREFOX_BINARY_PATH = '/usr/bin/firefox'
+USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0"
+WAIT_SECONDS = 15 # Ο χρόνος αναμονής, μπορούμε να τον αυξήσουμε αν χρειαστεί
 
-class iframe_src_is_http:
+def discover_referer():
     """
-    Μια προσαρμοσμένη συνθήκη αναμονής του Selenium.
-    Περιμένει μέχρι το src του iframe να αρχίζει με 'http'.
-    """
-    def __init__(self, locator):
-        self.locator = locator
-
-    def __call__(self, driver):
-        try:
-            iframe = driver.find_element(*self.locator)
-            src = iframe.get_attribute('src')
-            if src and src.startswith('http'):
-                return src  # Επιστρέφει το URL όταν το βρει
-            return False
-        except:
-            return False
-
-def get_referer_by_observing_dom():
-    """
-    Ξεκινά τον browser και περιμένει μέχρι να εμφανιστεί το πραγματικό URL του iframe.
+    Πιστή μεταφορά της λογικής του αρχικού script.
     """
     options = FirefoxOptions()
     options.add_argument("-headless")
     options.binary_location = FIREFOX_BINARY_PATH
-    options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
+    options.set_preference("general.useragent.override", USER_AGENT)
 
     driver = None
     try:
-        # ΣΗΜΑΝΤΙΚΗ ΑΛΛΑΓΗ: Χρησιμοποιούμε το κανονικό Selenium, όχι το selenium-wire
-        driver = Firefox(options=options)
-        driver.get(INSPECTION_URL)
+        driver = webdriver.Firefox(options=options)
+        del driver.requests
 
-        # Περιμένουμε μέχρι και 35 δευτερόλεπτα χρησιμοποιώντας τη νέα μας συνθήκη
-        print("Waiting up to 35 seconds for the iframe src to become a valid HTTP URL...", file=sys.stderr)
+        # 1. Επισκεπτόμαστε τη σελίδα
+        driver.get(INSPECTION_URL)
         
-        iframe_real_src = WebDriverWait(driver, 35).until(
-            iframe_src_is_http((By.TAG_NAME, "iframe"))
-        )
+        # 2. Περιμένουμε
+        print(f"Waiting for {WAIT_SECONDS} seconds for network traffic...", file=sys.stderr)
+        time.sleep(WAIT_SECONDS)
         
-        # Εξάγουμε το domain (origin) από το URL που βρήκαμε
-        parsed_url = urlparse(iframe_real_src)
-        origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
-        
-        print(f"SUCCESS: Found Referer by observing the iframe: {origin}", file=sys.stderr)
-        
-        # Τυπώνουμε ΜΟΝΟ το τελικό αποτέλεσμα
-        print(origin)
+        # 3. Ψάχνουμε στα requests (από το τελευταίο προς το πρώτο)
+        for request in reversed(driver.requests):
+            if '.m3u8' in request.url and request.headers.get('Referer'):
+                referer = request.headers['Referer'].strip('/')
+                print(f"SUCCESS: Found Referer: {referer}", file=sys.stderr)
+                # Τυπώνουμε ΜΟΝΟ το τελικό URL στην έξοδο
+                print(referer)
+                return # Χρησιμοποιούμε return για να βγούμε αμέσως
+
+        # Αν φτάσουμε εδώ, αποτύχαμε
+        print("ERROR: Could not find any .m3u8 request with a Referer header.", file=sys.stderr)
+        sys.exit(1)
 
     except Exception as e:
-        print(f"ERROR: Failed to get a valid iframe src. The site may be down or has changed significantly. Details: {e}", file=sys.stderr)
+        print(f"ERROR: A critical exception occurred: {e}", file=sys.stderr)
         sys.exit(1)
     finally:
         if driver:
             driver.quit()
 
 if __name__ == "__main__":
-    get_referer_by_observing_dom()
+    discover_referer()
