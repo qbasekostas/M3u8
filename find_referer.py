@@ -31,6 +31,8 @@ def find_final_referer():
     options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
 
     driver = None
+    player_domain = None
+    
     try:
         # --- ΒΗΜΑ 1: ΒΡΙΣΚΟΥΜΕ ΤΟ DOMAIN ΤΟΥ PLAYER ---
         driver = Firefox(options=options)
@@ -41,10 +43,14 @@ def find_final_referer():
             iframe_src_is_http((By.TAG_NAME, "iframe"))
         )
         
-        # Εξάγουμε το domain (π.χ. https://allupplay.xyz)
         player_domain = f"{urlparse(iframe_url).scheme}://{urlparse(iframe_url).netloc}"
         print(f"Found Player Domain: {player_domain}", file=sys.stderr)
         
+    except Exception as e:
+        print(f"ERROR during DOM observation phase: {e}", file=sys.stderr)
+        if driver:
+            driver.quit()
+        sys.exit(1)
     finally:
         if driver:
             driver.quit()
@@ -53,7 +59,6 @@ def find_final_referer():
     try:
         embed_url_for_api = f"{player_domain}/embed.php?id=stream-622"
         
-        # Παίρνουμε το περιεχόμενο του embed για να βρούμε το token
         embed_page_content = requests.get(embed_url_for_api).text
         token_match = re.search(r'"token":\s*"([^"]+)"', embed_page_content)
         
@@ -63,17 +68,12 @@ def find_final_referer():
         token = token_match.group(1)
         print(f"Found Token: {token}", file=sys.stderr)
         
-        # Κάνουμε την κλήση στο get.php API
         get_php_url = f"{player_domain}/get.php"
-        headers = {
-            'Referer': embed_url_for_api,
-            'X-Requested-With': 'XMLHttpRequest',
-        }
+        headers = {'Referer': embed_url_for_api, 'X-Requested-With': 'XMLHttpRequest'}
         data = {'id': 'stream-622', 'token': token}
         
         api_response = requests.post(get_php_url, headers=headers, data=data).text
         
-        # Εξάγουμε το τελικό URL του referer
         final_referer_match = re.search(r'Referer=([^&]+)', api_response)
 
         if not final_referer_match:
@@ -82,7 +82,6 @@ def find_final_referer():
         final_referer = final_referer_match.group(1)
         print(f"SUCCESS: Found Final Referer: {final_referer}", file=sys.stderr)
         
-        # Τυπώνουμε ΜΟΝΟ το τελικό αποτέλεσμα
         print(final_referer)
 
     except Exception as e:
