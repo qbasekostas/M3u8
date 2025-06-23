@@ -1,0 +1,43 @@
+name: Update Referer in m3u8
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'  # κάθε μέρα στις 07:00 π.μ. ώρα Ελλάδας
+
+jobs:
+  update-referer:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install Playwright
+        run: npm install playwright
+
+      - name: Install Playwright Browsers
+        run: npx playwright install --with-deps
+
+      - name: Run find_referer.js and extract headers
+        id: getref
+        run: |
+          node find_referer.js > out.txt
+          REF=$(grep ^REF= out.txt | cut -d= -f2-)
+          ORIGIN=$(grep ^ORIGIN= out.txt | cut -d= -f2-)
+          echo "ref=$REF" >> $GITHUB_OUTPUT
+          echo "origin=$ORIGIN" >> $GITHUB_OUTPUT
+
+      - name: Update m3u8 with new headers
+        run: |
+          sed -i "/^#EXTINF/!b;n;s|Referer=.*|Referer=${{ steps.getref.outputs.ref }}|g" GreekSportsChannels.m3u8
+          sed -i "/^#EXTINF/!b;n;s|Origin=.*|Origin=${{ steps.getref.outputs.origin }}|g" GreekSportsChannels.m3u8
+
+      - name: Commit and Push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "auto: update referer/origin in m3u8"
