@@ -4,12 +4,16 @@ import requests
 from selenium.webdriver import Firefox
 from selenium.webdriver.common.by import By
 from selenium.webdriver.firefox.options import Options as FirefoxOptions
+# Επαναφέρουμε το Service
+from selenium.webdriver.firefox.service import Service as FirefoxService
 from selenium.webdriver.support.ui import WebDriverWait
 from urllib.parse import urlparse
 
 # --- Ρυθμίσεις ---
 MIZTV_URL = "https://miztv.top/stream/stream-622.php"
 FIREFOX_BINARY_PATH = '/usr/bin/firefox'
+# Ο GeckoDriver τώρα βρίσκεται εδώ, όπως τον βάλαμε με το workflow
+GECKODRIVER_PATH = '/usr/local/bin/geckodriver'
 
 class iframe_src_is_http:
     """Περιμένει μέχρι το src του iframe να αρχίζει με 'http'."""
@@ -30,12 +34,15 @@ def find_final_referer():
     options.binary_location = FIREFOX_BINARY_PATH
     options.set_preference("general.useragent.override", "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:126.0) Gecko/20100101 Firefox/126.0")
 
+    # --- ΕΠΑΝΑΦΕΡΟΥΜΕ ΤΟ SERVICE ---
+    service = FirefoxService(executable_path=GECKODRIVER_PATH)
+
     driver = None
     player_domain = None
     
     try:
-        # Δεν χρειάζεται πλέον το service, το Selenium θα βρει το geckodriver στο PATH
-        driver = Firefox(options=options)
+        # Περνάμε ξανά το service στην αρχικοποίηση του driver
+        driver = Firefox(options=options, service=service)
         driver.get(MIZTV_URL)
         
         print("Waiting for iframe to get a valid HTTP source...", file=sys.stderr)
