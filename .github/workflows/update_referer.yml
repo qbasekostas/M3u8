@@ -1,8 +1,8 @@
-name: Fully Automatic Final Updater (Manual GeckoDriver)
+name: Fully Automatic Referer Updater (DaddyLive Method)
 
 on:
   schedule:
-    - cron: '0 */4 * * *'
+    - cron: '0 */2 * * *' # Κάθε 2 ώρες
   workflow_dispatch:
 
 jobs:
@@ -20,31 +20,17 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Firefox and GeckoDriver
-        run: |
-          # --- ΕΓΚΑΤΑΣΤΑΣΗ FIREFOX (PPA METHOD) ---
-          sudo install -d -m 0755 /etc/apt/keyrings
-          wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O- | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc > /dev/null
-          echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" | sudo tee -a /etc/apt/sources.list.d/mozilla.list > /dev/null
-          echo 'Package: *; Pin: origin packages.mozilla.org; Pin-Priority: 1000' | sudo tee /etc/apt/preferences.d/mozilla
-          sudo apt-get update && sudo apt-get install -y firefox
-
-          # --- ΧΕΙΡΟΚΙΝΗΤΗ ΕΓΚΑΤΑΣΤΑΣΗ GECKODRIVER ---
-          GECKODRIVER_VERSION="v0.34.0" # Μπορείτε να αλλάξετε την έκδοση αν χρειαστεί
-          wget -q "https://github.com/mozilla/geckodriver/releases/download/${GECKODRIVER_VERSION}/geckodriver-${GECKODRIVER_VERSION}-linux64.tar.gz"
-          tar -xzf "geckodriver-${GECKODRIVER_VERSION}-linux64.tar.gz"
-          sudo mv geckodriver /usr/local/bin/ # Τοποθέτηση στο PATH
-
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install selenium requests
+          # Χρειαζόμαστε ΜΟΝΟ το requests!
+          pip install requests
 
-      - name: Find new Referer and Authorize IP
+      - name: Find new Referer (Browserless Method)
         id: find_auth
         run: |
-          # Τώρα δεν χρειάζεται να ορίζουμε το path στο Python script, θα το βρει μόνο του
-          NEW_REFERER=$(python find_and_auth.py)
+          # Εκτελούμε το script που ΔΕΝ χρησιμοποιεί browser
+          NEW_REFERER=$(python find_referer.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 File
