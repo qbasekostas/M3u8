@@ -1,8 +1,8 @@
-name: Fully Automatic Referer Updater (The Right Way)
+name: Fully Automatic Final Updater (The Real One)
 
 on:
   schedule:
-    - cron: '0 */2 * * *' # Κάθε 2 ώρες
+    - cron: '0 */2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -25,10 +25,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Find new Referer (API Method)
+      - name: Find new Referer (Browserless - Correct Method)
         id: find_auth
         run: |
-          # Εκτελούμε το τελικό, σωστό script
           NEW_REFERER=$(python find_and_auth.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
