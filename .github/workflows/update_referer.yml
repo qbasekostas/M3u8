@@ -2,7 +2,8 @@ name: Fully Automatic Final Updater (The Real One)
 
 on:
   schedule:
-    - cron: '0 */2 * * *'
+    # Τρέχει κάθε μέρα στις 12:00 UTC (15:00 ώρα Ελλάδας το καλοκαίρι)
+    - cron: '0 12 * * *'
   workflow_dispatch:
 
 jobs:
