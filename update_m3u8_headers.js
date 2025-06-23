@@ -1,7 +1,6 @@
 const { chromium } = require('playwright');
 const fs = require('fs');
 
-// Ορισμός URLs και αρχείου m3u8 από arguments ή default
 const STREAM_URL = process.argv[2] || 'https://miztv.top/stream/stream-622.php';
 const M3U8_FILE = process.argv[3] || 'GreekSportsChannels.m3u8';
 
@@ -11,7 +10,6 @@ const M3U8_FILE = process.argv[3] || 'GreekSportsChannels.m3u8';
 
     let referer = null, origin = null, m3u8url = null, found = false;
 
-    // DEBUG: Εκτύπωσε κάθε request προς .m3u8
     context.on('request', request => {
         if (request.url().includes('.m3u8')) {
             console.log('[DEBUG] Βρέθηκε αίτημα προς .m3u8: ' + request.url());
@@ -35,34 +33,44 @@ const M3U8_FILE = process.argv[3] || 'GreekSportsChannels.m3u8';
     console.log(`[DEBUG] Μετάβαση στη σελίδα: ${STREAM_URL}`);
     await page.goto(STREAM_URL, { waitUntil: "domcontentloaded" });
 
-    // DEBUG: Περίμενε, μήπως φορτώνει κάποιο iframe/player
-    await page.waitForTimeout(3000);
+    // Περίμενε λίγο να φορτώσουν τα iframes
+    await page.waitForTimeout(5000);
 
-    // DEBUG: Δες αν υπάρχουν κουμπιά και κάνε click κατά σειρά
-    const buttons = await page.$$('button');
-    if (buttons.length > 0) {
-        for (let i = 0; i < buttons.length; i++) {
-            try {
-                console.log(`[DEBUG] Κάνω click στο κουμπί #${i + 1}`);
-                await buttons[i].click();
-                await page.waitForTimeout(1000);
-            } catch (e) {
-                console.log(`[DEBUG] Σφάλμα στο click κουμπιού #${i + 1}:`, e.message);
+    // Πάρε όλα τα iframe elements
+    const frames = page.frames();
+    console.log(`[DEBUG] Βρέθηκαν ${frames.length} frames`);
+
+    for (let i = 0; i < frames.length; i++) {
+        const frame = frames[i];
+        try {
+            // Πάτα όλα τα buttons σε κάθε frame
+            const buttons = await frame.$$('button');
+            console.log(`[DEBUG][Frame ${i}] Βρέθηκαν ${buttons.length} κουμπιά`);
+            for (let j = 0; j < buttons.length; j++) {
+                try {
+                    console.log(`[DEBUG][Frame ${i}] Κάνω click στο κουμπί #${j + 1}`);
+                    await buttons[j].click();
+                    await page.waitForTimeout(1000);
+                } catch (e) {
+                    console.log(`[DEBUG][Frame ${i}] Σφάλμα στο click κουμπιού #${j + 1}:`, e.message);
+                }
             }
+        } catch (e) {
+            console.log(`[DEBUG][Frame ${i}] Σφάλμα στην επεξεργασία κουμπιών:`, e.message);
         }
-    } else {
-        console.log('[DEBUG] Δεν βρέθηκαν κουμπιά για click.');
     }
 
-    // DEBUG: Δοκίμασε να πατήσεις Space
-    try {
-        await page.keyboard.press('Space');
-        console.log('[DEBUG] Πάτησα Space.');
-    } catch (e) {
-        console.log('[DEBUG] Αποτυχία στο πάτημα Space:', e.message);
+    // Πάτησε Space σε όλα τα frames (αν και συνήθως δεν χρειάζεται)
+    for (let i = 0; i < frames.length; i++) {
+        try {
+            await frames[i].keyboard.press('Space');
+            console.log(`[DEBUG][Frame ${i}] Πάτησα Space.`);
+        } catch (e) {
+            // Αγνόησε το error
+        }
     }
 
-    // Περίμενε αρκετά για να ξεκινήσει το stream (40 δευτερόλεπτα)
+    // Περίμενε αρκετά να γίνει το αίτημα (.m3u8)
     await page.waitForTimeout(40000);
 
     await browser.close();
@@ -74,7 +82,6 @@ const M3U8_FILE = process.argv[3] || 'GreekSportsChannels.m3u8';
 
     // === Ενημέρωση m3u8 αρχείου ===
     const content = fs.readFileSync(M3U8_FILE, 'utf-8');
-    // Αντικατάσταση headers σε όλες τις γραμμές που περιέχουν Referer/Origin
     const updated = content.replace(
         /\|?Referer=[^&\r\n]+&Origin=[^&\r\n]+/g,
         `|Referer=${referer}&Origin=${origin}`
