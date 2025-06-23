@@ -1,4 +1,4 @@
-name: Fully Automatic Referer Updater (DaddyLive Method)
+name: Fully Automatic Referer Updater (The Right Way)
 
 on:
   schedule:
@@ -23,14 +23,13 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          # Χρειαζόμαστε ΜΟΝΟ το requests!
           pip install requests
 
-      - name: Find new Referer (Browserless Method)
+      - name: Find new Referer (API Method)
         id: find_auth
         run: |
-          # Εκτελούμε το script που ΔΕΝ χρησιμοποιεί browser
-          NEW_REFERER=$(python find_referer.py)
+          # Εκτελούμε το τελικό, σωστό script
+          NEW_REFERER=$(python find_and_auth.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 File
