@@ -23,10 +23,10 @@ jobs:
       - name: Install Playwright Browsers
         run: npx playwright install --with-deps
 
-      - name: Run find_referer.js and extract headers
+      - name: Run find_referercop.js and extract headers
         id: getref
         run: |
-          node find_referer.js > out.txt
+          node find_referercop.js > out.txt
           REF=$(grep ^REF= out.txt | cut -d= -f2-)
           ORIGIN=$(grep ^ORIGIN= out.txt | cut -d= -f2-)
           echo "ref=$REF" >> $GITHUB_OUTPUT
