@@ -1,8 +1,8 @@
-name: Automatic Referer Updater (Final DOM Observation Method)
+name: Automatic Referer Updater (Final Attempt)
 
 on:
   schedule:
-    - cron: '0 14 * * *'
+    - cron: '0 15 * * *'
   workflow_dispatch:
 
 jobs:
@@ -35,13 +35,17 @@ jobs:
       - name: Install Python Dependencies
         run: |
           python -m pip install --upgrade pip
-          # Δεν χρειαζόμαστε πλέον το selenium-wire, μόνο το selenium
-          pip install selenium
+          pip install selenium-wire "blinker<1.8.0"
 
       - name: Run Python script to find the new Referer
         id: find_referer
         run: |
           NEW_REFERER=$(python find_referer.py)
+          if [ -z "$NEW_REFERER" ]; then
+            echo "::error::Python script returned an empty string."
+            exit 1
+          fi
+          echo "Found new Referer URL: $NEW_REFERER"
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 file
