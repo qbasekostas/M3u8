@@ -2,7 +2,7 @@ name: Fully Automatic Final Updater
 
 on:
   schedule:
-    - cron: '0 */4 * * *' # Κάθε 4 ώρες για να είναι πάντα φρέσκια η εξουσιοδότηση
+    - cron: '0 */4 * * *'
   workflow_dispatch:
 
 jobs:
@@ -20,13 +20,16 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Firefox
+      - name: Install Firefox and GeckoDriver
         run: |
+          # Εγκαθιστούμε τον Firefox από το PPA της Mozilla
           sudo install -d -m 0755 /etc/apt/keyrings
           wget -q https://packages.mozilla.org/apt/repo-signing-key.gpg -O- | sudo tee /etc/apt/keyrings/packages.mozilla.org.asc > /dev/null
           echo "deb [signed-by=/etc/apt/keyrings/packages.mozilla.org.asc] https://packages.mozilla.org/apt mozilla main" | sudo tee -a /etc/apt/sources.list.d/mozilla.list > /dev/null
           echo 'Package: *; Pin: origin packages.mozilla.org; Pin-Priority: 1000' | sudo tee /etc/apt/preferences.d/mozilla
-          sudo apt-get update && sudo apt-get install -y firefox
+          
+          # ΕΓΚΑΤΑΣΤΑΣΗ ΤΟΥ GECKODRIVER
+          sudo apt-get update && sudo apt-get install -y firefox geckodriver
 
       - name: Install Python Dependencies
         run: |
@@ -36,7 +39,6 @@ jobs:
       - name: Find new Referer and Authorize IP
         id: find_auth
         run: |
-          # Εκτελούμε το τελικό μας script
           NEW_REFERER=$(python find_and_auth.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
