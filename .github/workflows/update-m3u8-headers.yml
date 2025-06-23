@@ -1,0 +1,37 @@
+name: Update Referer and Origin in m3u8
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 4 * * *'  # κάθε μέρα στις 07:00 π.μ. ώρα Ελλάδας (04:00 UTC)
+
+jobs:
+  update-headers:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: |
+          npm install playwright
+
+      - name: Install Playwright browsers
+        run: |
+          npx playwright install --with-deps
+
+      - name: Update m3u8 headers automatically
+        run: |
+          node update_m3u8_headers.js "https://miztv.top/stream/stream-622.php" GreekSportsChannels.m3u8
+
+      - name: Commit & Push changes
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "auto: update referer/origin in m3u8"
+          file_pattern: GreekSportsChannels.m3u8
