@@ -28,13 +28,11 @@ jobs:
       - name: Find new Referer (Browserless - Correct Method)
         id: find_auth
         run: |
-          # Το find_and_auth.py πρέπει να είναι στο root του repository
           NEW_REFERER=$(python find_and_auth.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 File
         env:
-          # Το νέο URL που βρήκαμε (π.χ. https://new-site.xyz/)
           NEW_URL: ${{ steps.find_auth.outputs.new_referer_url }}
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
@@ -43,40 +41,22 @@ jobs:
             echo "::error::The new URL found is empty. Aborting."
             exit 1
           fi
-          
-          # Βρίσκουμε τον παλιό Referer από το αρχείο
+
+          # Βρίσκουμε τον παλιό Referer μόνο για να ελέγξουμε αν χρειάζεται αλλαγή
           OLD_REFERER=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
-          if [ -z "$OLD_REFERER" ]; then
-            echo "::error::Could not find the old Referer in the file."
-            exit 1
-          fi
 
-          # Βρίσκουμε το παλιό Origin από το αρχείο
-          OLD_ORIGIN=$(grep -oP 'Origin=\K.+' "$TARGET_FILE" | head -n 1)
-          if [ -z "$OLD_ORIGIN" ]; then
-            echo "::error::Could not find the old Origin in the file."
-            exit 1
-          fi
-
-          echo "Old Referer: $OLD_REFERER"
-          echo "Old Origin: $OLD_ORIGIN"
-          echo "New URL for both: $NEW_URL"
-          
-          # Έλεγχος αν χρειάζεται αλλαγή
-          if [ "$OLD_REFERER" == "$NEW_URL" ] && [ "$OLD_ORIGIN" == "$NEW_URL" ]; then
-            echo "Referer and Origin are already up-to-date."
+          if [ "$OLD_REFERER" == "$NEW_URL" ]; then
+            echo "URL is already up-to-date. No changes needed."
             exit 0
           fi
 
-          # --- ΕΔΩ ΕΙΝΑΙ Η ΑΛΛΑΓΗ ---
-          # 1. Αντικαθιστούμε ΟΛΕΣ τις εμφανίσεις του παλιού Referer με το νέο URL
-          echo "Updating Referer..."
-          sed -i "s|$OLD_REFERER|$NEW_URL|g" "$TARGET_FILE"
+          echo "Rebuilding Referer and Origin for all links with new URL: $NEW_URL"
 
-          # 2. Αντικαθιστούμε ΟΛΕΣ τις εμφανίσεις του παλιού Origin με το νέο URL
-          echo "Updating Origin..."
-          sed -i "s|$OLD_ORIGIN|$NEW_URL|g" "$TARGET_FILE"
-          
+          # --- Η ΤΕΛΙΚΗ, ΑΛΑΝΘΑΣΤΗ ΕΝΤΟΛΗ ---
+          # Για κάθε γραμμή που περιέχει ".m3u8", σβήνει ό,τι υπάρχει μετά το # (αν υπάρχει)
+          # και το ξαναχτίζει από την αρχή, σωστά και ομοιόμορφα.
+          sed -i -E "s|^(https?://.*\.m3u8)(#.*)?$|\1#Referer=${NEW_URL}&Origin=${NEW_URL}|" "$TARGET_FILE"
+
           echo "File updated successfully."
 
       - name: Commit and push changes
