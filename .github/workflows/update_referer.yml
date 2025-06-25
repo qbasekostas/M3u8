@@ -2,8 +2,7 @@ name: Fully Automatic Final Updater (The Real One)
 
 on:
   schedule:
-    # Τρέχει κάθε μέρα στις 12:00 UTC (15:00 ώρα Ελλάδας το καλοκαίρι)
-    - cron: '0 12 * * *'
+    - cron: '0 */2 * * *'
   workflow_dispatch:
 
 jobs:
@@ -29,30 +28,59 @@ jobs:
       - name: Find new Referer (Browserless - Correct Method)
         id: find_auth
         run: |
+          # Το find_and_auth.py πρέπει να είναι στο root του repository
           NEW_REFERER=$(python find_and_auth.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
       - name: Update M3U8 File
         env:
+          # Το νέο URL που βρήκαμε (π.χ. https://new-site.xyz/)
           NEW_URL: ${{ steps.find_auth.outputs.new_referer_url }}
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
-          OLD_URL=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
 
-          if [ -z "$OLD_URL" ]; then
-            echo "::error::Could not find OLD_URL in the file." && exit 1
+          if [ -z "$NEW_URL" ]; then
+            echo "::error::The new URL found is empty. Aborting."
+            exit 1
           fi
           
-          if [ "$OLD_URL" == "$NEW_URL" ]; then
-            echo "URL is already up-to-date." && exit 0
+          # Βρίσκουμε τον παλιό Referer από το αρχείο
+          OLD_REFERER=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
+          if [ -z "$OLD_REFERER" ]; then
+            echo "::error::Could not find the old Referer in the file."
+            exit 1
           fi
 
-          echo "Replacing '$OLD_URL' with '$NEW_URL'..."
-          sed -i "s|$OLD_URL|$NEW_URL|g" "$TARGET_FILE"
+          # Βρίσκουμε το παλιό Origin από το αρχείο
+          OLD_ORIGIN=$(grep -oP 'Origin=\K.+' "$TARGET_FILE" | head -n 1)
+          if [ -z "$OLD_ORIGIN" ]; then
+            echo "::error::Could not find the old Origin in the file."
+            exit 1
+          fi
+
+          echo "Old Referer: $OLD_REFERER"
+          echo "Old Origin: $OLD_ORIGIN"
+          echo "New URL for both: $NEW_URL"
+          
+          # Έλεγχος αν χρειάζεται αλλαγή
+          if [ "$OLD_REFERER" == "$NEW_URL" ] && [ "$OLD_ORIGIN" == "$NEW_URL" ]; then
+            echo "Referer and Origin are already up-to-date."
+            exit 0
+          fi
+
+          # --- ΕΔΩ ΕΙΝΑΙ Η ΑΛΛΑΓΗ ---
+          # 1. Αντικαθιστούμε ΟΛΕΣ τις εμφανίσεις του παλιού Referer με το νέο URL
+          echo "Updating Referer..."
+          sed -i "s|$OLD_REFERER|$NEW_URL|g" "$TARGET_FILE"
+
+          # 2. Αντικαθιστούμε ΟΛΕΣ τις εμφανίσεις του παλιού Origin με το νέο URL
+          echo "Updating Origin..."
+          sed -i "s|$OLD_ORIGIN|$NEW_URL|g" "$TARGET_FILE"
+          
           echo "File updated successfully."
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: ✨ Automate update of Referer/Origin URL'
+          commit_message: 'ci: ✨ Automate update of Referer & Origin URL'
           file_pattern: 'GreekSportsChannels.m3u8'
