@@ -1,4 +1,4 @@
-name: Fully Automatic Final Updater (Safe Rebuild Method)
+name: Fully Automatic Final Updater (Correct Formatting)
 
 on:
   schedule:
@@ -28,20 +28,30 @@ jobs:
       - name: Find new Referer
         id: find_auth
         run: |
+          # Το find_and_auth.py επιστρέφει το URL με μια κάθετο στο τέλος
           NEW_REFERER=$(python find_and_auth.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
-      - name: Safely Rebuild M3U8 File
+      - name: Safely Rebuild M3U8 File with Correct Formatting
         env:
-          NEW_URL: ${{ steps.find_auth.outputs.new_referer_url }}
+          # π.χ. https://new-site.xyz/
+          NEW_URL_WITH_SLASH: ${{ steps.find_auth.outputs.new_referer_url }}
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
           TEMP_FILE="temp_new.m3u8"
           
-          if [ -z "$NEW_URL" ]; then
+          if [ -z "$NEW_URL_WITH_SLASH" ]; then
             echo "::error::The new URL found is empty. Aborting."
             exit 1
           fi
+
+          # --- ΕΔΩ ΕΙΝΑΙ Η ΜΑΓΕΙΑ ---
+          # Δημιουργούμε μια δεύτερη έκδοση του URL ΧΩΡΙΣ την τελική κάθετο
+          # Η εντολή sed 's:/*$::' αφαιρεί οποιεσδήποτε κάθετους από το τέλος
+          NEW_URL_FOR_ORIGIN=$(echo "$NEW_URL_WITH_SLASH" | sed 's:/*$::')
+
+          echo "URL for Referer (with slash): $NEW_URL_WITH_SLASH"
+          echo "URL for Origin (without slash): $NEW_URL_FOR_ORIGIN"
 
           # Διαβάζουμε το αρχικό αρχείο γραμμή-γραμμή
           while IFS= read -r line; do
@@ -49,22 +59,22 @@ jobs:
             if [[ "$line" == "https://"* ]]; then
               # Κόβουμε το URL μέχρι το .m3u8
               BASE_URL=$(echo "$line" | grep -oP '^https?://.*?\.m3u8')
-              # Κατασκευάζουμε τη νέα, σωστή γραμμή
-              NEW_LINE="${BASE_URL}#Referer=${NEW_URL}&Origin=${NEW_URL}"
+              # Κατασκευάζουμε τη νέα, σωστή γραμμή με τις σωστές μεταβλητές
+              NEW_LINE="${BASE_URL}#Referer=${NEW_URL_WITH_SLASH}&Origin=${NEW_URL_FOR_ORIGIN}"
               echo "$NEW_LINE" >> "$TEMP_FILE"
             else
-              # Αν δεν είναι URL (π.χ. #EXTINF), απλά την αντιγράφουμε ως έχει
+              # Αν δεν είναι URL, απλά την αντιγράφουμε ως έχει
               echo "$line" >> "$TEMP_FILE"
             fi
           done < "$TARGET_FILE"
 
-          # Αντικαθιστούμε το παλιό αρχείο με το νέο, προσωρινό
+          # Αντικαθιστούμε το παλιό αρχείο με το νέο
           mv "$TEMP_FILE" "$TARGET_FILE"
           
-          echo "File rebuilt successfully with new Referer and Origin."
+          echo "File rebuilt successfully with correct formatting."
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: ✨ Rebuild M3U8 with updated Referer/Origin'
+          commit_message: 'ci: ✨ Rebuild M3U8 with updated Referer/Origin (Correct Formatting)'
           file_pattern: 'GreekSportsChannels.m3u8'
