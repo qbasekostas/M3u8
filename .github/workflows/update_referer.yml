@@ -1,4 +1,4 @@
-name: Fully Automatic Final Updater (The Real One)
+name: Fully Automatic Final Updater (Safe Rebuild Method)
 
 on:
   schedule:
@@ -25,42 +25,46 @@ jobs:
           python -m pip install --upgrade pip
           pip install requests
 
-      - name: Find new Referer (Browserless - Correct Method)
+      - name: Find new Referer
         id: find_auth
         run: |
           NEW_REFERER=$(python find_and_auth.py)
           echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
 
-      - name: Update M3U8 File
+      - name: Safely Rebuild M3U8 File
         env:
           NEW_URL: ${{ steps.find_auth.outputs.new_referer_url }}
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
-
+          TEMP_FILE="temp_new.m3u8"
+          
           if [ -z "$NEW_URL" ]; then
             echo "::error::The new URL found is empty. Aborting."
             exit 1
           fi
 
-          # Βρίσκουμε τον παλιό Referer μόνο για να ελέγξουμε αν χρειάζεται αλλαγή
-          OLD_REFERER=$(grep -oP 'Referer=\K[^&]+' "$TARGET_FILE" | head -n 1)
+          # Διαβάζουμε το αρχικό αρχείο γραμμή-γραμμή
+          while IFS= read -r line; do
+            # Ελέγχουμε αν η γραμμή είναι URL
+            if [[ "$line" == "https://"* ]]; then
+              # Κόβουμε το URL μέχρι το .m3u8
+              BASE_URL=$(echo "$line" | grep -oP '^https?://.*?\.m3u8')
+              # Κατασκευάζουμε τη νέα, σωστή γραμμή
+              NEW_LINE="${BASE_URL}#Referer=${NEW_URL}&Origin=${NEW_URL}"
+              echo "$NEW_LINE" >> "$TEMP_FILE"
+            else
+              # Αν δεν είναι URL (π.χ. #EXTINF), απλά την αντιγράφουμε ως έχει
+              echo "$line" >> "$TEMP_FILE"
+            fi
+          done < "$TARGET_FILE"
 
-          if [ "$OLD_REFERER" == "$NEW_URL" ]; then
-            echo "URL is already up-to-date. No changes needed."
-            exit 0
-          fi
-
-          echo "Rebuilding Referer and Origin for all links with new URL: $NEW_URL"
-
-          # --- Η ΤΕΛΙΚΗ, ΑΛΑΝΘΑΣΤΗ ΕΝΤΟΛΗ ---
-          # Για κάθε γραμμή που περιέχει ".m3u8", σβήνει ό,τι υπάρχει μετά το # (αν υπάρχει)
-          # και το ξαναχτίζει από την αρχή, σωστά και ομοιόμορφα.
-          sed -i -E "s|^(https?://.*\.m3u8)(#.*)?$|\1#Referer=${NEW_URL}&Origin=${NEW_URL}|" "$TARGET_FILE"
-
-          echo "File updated successfully."
+          # Αντικαθιστούμε το παλιό αρχείο με το νέο, προσωρινό
+          mv "$TEMP_FILE" "$TARGET_FILE"
+          
+          echo "File rebuilt successfully with new Referer and Origin."
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: ✨ Automate update of Referer & Origin URL'
+          commit_message: 'ci: ✨ Rebuild M3U8 with updated Referer/Origin'
           file_pattern: 'GreekSportsChannels.m3u8'
