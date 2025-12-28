@@ -1,16 +1,13 @@
-name: Fully Automatic Final Updater (Correct Formatting)
+name: Streamlink CSS Updater for Enigma2
 
 on:
   schedule:
-    - cron: '0 12 * * *'
+    - cron: '0 */4 * * *' # Τρέχει κάθε 4 ώρες γιατί το token λήγει
   workflow_dispatch:
 
 jobs:
   update:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -20,61 +17,64 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Install Python Dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install requests
+      - name: Install Dependencies
+        run: pip install requests
 
-      - name: Find new Referer
-        id: find_auth
+      - name: Extract Auth Data
+        id: auth
         run: |
-          # Το find_and_auth.py επιστρέφει το URL με μια κάθετο στο τέλος
-          NEW_REFERER=$(python find_and_auth.py)
-          echo "new_referer_url=$NEW_REFERER" >> $GITHUB_OUTPUT
+          RAW_DATA=$(python find_and_auth.py)
+          TOKEN=$(echo $RAW_DATA | cut -d'|' -f1)
+          REFERER=$(echo $RAW_DATA | cut -d'|' -f2)
+          ORIGIN=$(echo $RAW_DATA | cut -d'|' -f3)
+          
+          echo "token=$TOKEN" >> $GITHUB_OUTPUT
+          echo "referer=$REFERER" >> $GITHUB_OUTPUT
+          echo "origin=$ORIGIN" >> $GITHUB_OUTPUT
 
-      - name: Safely Rebuild M3U8 File with Correct Formatting
+      - name: Rebuild M3U8 for OS Mio 4K
         env:
-          # π.χ. https://new-site.xyz/
-          NEW_URL_WITH_SLASH: ${{ steps.find_auth.outputs.new_referer_url }}
+          TOKEN: ${{ steps.auth.outputs.token }}
+          REFERER: ${{ steps.auth.outputs.referer }}
+          ORIGIN: ${{ steps.auth.outputs.origin }}
         run: |
           TARGET_FILE="GreekSportsChannels.m3u8"
-          TEMP_FILE="temp_new.m3u8"
+          TEMP_FILE="temp.m3u8"
           
-          if [ -z "$NEW_URL_WITH_SLASH" ]; then
-            echo "::error::The new URL found is empty. Aborting."
-            exit 1
-          fi
+          # Ξεκινάμε το αρχείο
+          echo "#EXTM3U" > $TEMP_FILE
 
-          # --- ΕΔΩ ΕΙΝΑΙ Η ΜΑΓΕΙΑ ---
-          # Δημιουργούμε μια δεύτερη έκδοση του URL ΧΩΡΙΣ την τελική κάθετο
-          # Η εντολή sed 's:/*$::' αφαιρεί οποιεσδήποτε κάθετους από το τέλος
-          NEW_URL_FOR_ORIGIN=$(echo "$NEW_URL_WITH_SLASH" | sed 's:/*$::')
+          # Λίστα καναλιών (ID και Όνομα)
+          # Μπορείς να προσθέσεις όσα θες εδώ
+          declare -A channels
+          channels=( 
+            ["premium622"]="Cosmote Sport 1 HD"
+            ["premium623"]="Cosmote Sport 2 HD"
+            ["premium624"]="Cosmote Sport 3 HD"
+            ["premium625"]="Cosmote Sport 4 HD"
+            ["premium626"]="Cosmote Sport 5 HD"
+            ["premium638"]="Nova Sports Prime HD"
+            ["premium631"]="Nova Sports 1 HD"
+          )
 
-          echo "URL for Referer (with slash): $NEW_URL_WITH_SLASH"
-          echo "URL for Origin (without slash): $NEW_URL_FOR_ORIGIN"
+          for id in "${!channels[@]}"; do
+            NAME="${channels[$id]}"
+            
+            # Κατασκευή του URL για το Streamlink 8088 του δέκτη
+            # Χρησιμοποιούμε kiko2.ru που είναι το νέο domain
+            BASE_URL="http://127.0.0.1:8088/https://dokko1new.kiko2.ru/dokko1/${id}/mono.css"
+            
+            # Προσθήκη των Headers με τη σύνταξη που καταλαβαίνει ο δέκτης σου
+            HEADERS=" -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=${id} -http-header=Authorization=Bearer+${TOKEN}"
+            
+            echo "#EXTINF:-1,${NAME}" >> $TEMP_FILE
+            echo "${BASE_URL}${HEADERS}" >> $TEMP_FILE
+          done
 
-          # Διαβάζουμε το αρχικό αρχείο γραμμή-γραμμή
-          while IFS= read -r line; do
-            # Ελέγχουμε αν η γραμμή είναι URL
-            if [[ "$line" == "https://"* ]]; then
-              # Κόβουμε το URL μέχρι το .m3u8
-              BASE_URL=$(echo "$line" | grep -oP '^https?://.*?\.m3u8')
-              # Κατασκευάζουμε τη νέα, σωστή γραμμή με τις σωστές μεταβλητές
-              NEW_LINE="${BASE_URL}#Referer=${NEW_URL_WITH_SLASH}&Origin=${NEW_URL_FOR_ORIGIN}"
-              echo "$NEW_LINE" >> "$TEMP_FILE"
-            else
-              # Αν δεν είναι URL, απλά την αντιγράφουμε ως έχει
-              echo "$line" >> "$TEMP_FILE"
-            fi
-          done < "$TARGET_FILE"
-
-          # Αντικαθιστούμε το παλιό αρχείο με το νέο
-          mv "$TEMP_FILE" "$TARGET_FILE"
-          
-          echo "File rebuilt successfully with correct formatting."
+          mv $TEMP_FILE $TARGET_FILE
 
       - name: Commit and push changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: 'ci: ✨ Rebuild M3U8 with updated Referer/Origin (Correct Formatting)'
+          commit_message: 'Updated Tokens and CSS links'
           file_pattern: 'GreekSportsChannels.m3u8'
