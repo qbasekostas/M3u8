@@ -3,40 +3,49 @@ import re
 import requests
 from urllib.parse import urlparse
 
-# --- Η ΑΡΧΙΚΗ ΠΗΓΗ ΠΛΗΡΟΦΟΡΙΩΝ ---
 MIZTV_URL = "https://miztv.top/stream/stream-622.php"
 
-def find_player_domain():
-    """
-    1. Παίρνει το HTML του miztv.
-    2. Βρίσκει το domain του player από το iframe.
-    3. Επιστρέφει ΑΥΤΟ το domain.
-    """
+def fetch_data():
     session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
-    })
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:146.0) Gecko/20100101 Firefox/146.0",
+        "Referer": "https://miztv.top/"
+    }
 
     try:
-        print(f"Fetching main page to find iframe: {MIZTV_URL}", file=sys.stderr)
-        miztv_content = session.get(MIZTV_URL, timeout=25).text
+        # 1. Παίρνουμε τη σελίδα του Miztv για να βρούμε το iframe
+        response = session.get(MIZTV_URL, headers=headers, timeout=20)
+        iframe_match = re.search(r'iframe\s+src="([^"]+)"', response.text)
+        if not iframe_match:
+            return "ERROR", "NO_IFRAME", "NO_DOMAIN"
         
-        # Χρησιμοποιούμε regular expression για να βρούμε το src του iframe
-        iframe_src_match = re.search(r'iframe\s+src="([^"]+)"', miztv_content)
-        if not iframe_src_match:
-            raise ValueError("Could not find iframe src in the main page HTML.")
-            
-        iframe_url = iframe_src_match.group(1)
-        # Εξάγουμε το domain (π.χ. https://forcedtoplay.xyz)
+        iframe_url = iframe_match.group(1)
         player_domain = f"{urlparse(iframe_url).scheme}://{urlparse(iframe_url).netloc}/"
+
+        # 2. Μπαίνουμε στο iframe για να πάρουμε το AUTH_TOKEN
+        # Πρέπει να στείλουμε Referer το Miztv
+        headers["Referer"] = MIZTV_URL
+        player_page = session.get(iframe_url, headers=headers, timeout=20).text
         
-        print(f"SUCCESS! Dynamically discovered player domain: {player_domain}", file=sys.stderr)
-        # Τυπώνουμε ΜΟΝΟ το τελικό αποτέλεσμα
-        print(player_domain)
+        token_match = re.search(r'AUTH_TOKEN\s*=\s*"([^"]+)"', player_page)
+        if not token_match:
+            # Δοκιμή για το εναλλακτικό όνομα μεταβλητής
+            token_match = re.search(r'SESSION_TOKEN\s*=\s*"([^"]+)"', player_page)
+
+        if token_match:
+            token = token_match.group(1)
+            # Επιστρέφουμε: TOKEN, DOMAIN_WITH_SLASH, DOMAIN_WITHOUT_SLASH
+            return token, player_domain, player_domain.rstrip('/')
+        else:
+            return "ERROR", "NO_TOKEN", player_domain
 
     except Exception as e:
-        print(f"FATAL ERROR: The process failed. Details: {e}", file=sys.stderr)
-        sys.exit(1)
+        return "ERROR", str(e), "ERROR"
 
 if __name__ == "__main__":
-    find_player_domain()
+    token, ref, origin = fetch_data()
+    if token == "ERROR":
+        print(f"FAILED: {ref}")
+        sys.exit(1)
+    # Τυπώνουμε τα αποτελέσματα σε μία γραμμή για να τα πάρει το bash
+    print(f"{token}|{ref}|{origin}")
