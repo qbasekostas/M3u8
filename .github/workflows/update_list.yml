@@ -1,9 +1,9 @@
-name: OS Mio 4K Streamlink Updater
+name: OS Mio 4K Streamlink Generator
 
 on:
   schedule:
-    - cron: '0 */3 * * *' # Τρέχει κάθε 3 ώρες
-  workflow_dispatch:      # Σου επιτρέπει να το τρέχεις χειροκίνητα
+    - cron: '0 */3 * * *' # Τρέχει κάθε 3 ώρες (γιατί τα tokens λήγουν)
+  workflow_dispatch:      # Χειροκίνητη εκκίνηση
 
 jobs:
   update:
@@ -23,17 +23,17 @@ jobs:
       - name: Install Dependencies
         run: pip install requests
 
-      - name: Scrape Token and Headers
+      - name: Scrape Data
         id: scrape
         run: |
           RAW_DATA=$(python find_and_auth.py)
-          if [ "$RAW_DATA" == "FAILED" ]; then echo "Failed to get token"; exit 1; fi
+          if [ "$RAW_DATA" == "FAILED" ]; then echo "Scraping failed"; exit 1; fi
           
           echo "token=$(echo $RAW_DATA | cut -d'|' -f1)" >> $GITHUB_OUTPUT
           echo "referer=$(echo $RAW_DATA | cut -d'|' -f2)" >> $GITHUB_OUTPUT
           echo "origin=$(echo $RAW_DATA | cut -d'|' -f3)" >> $GITHUB_OUTPUT
 
-      - name: Rebuild M3U8 File
+      - name: Generate M3U8 File
         env:
           TOKEN: ${{ steps.scrape.outputs.token }}
           REFERER: ${{ steps.scrape.outputs.referer }}
@@ -42,26 +42,35 @@ jobs:
           FILE="GreekSportsChannels.m3u8"
           echo "#EXTM3U" > $FILE
           
-          # Λίστα Cosmote Sport 1-9
-          declare -A cosmote=( ["622"]="1" ["623"]="2" ["624"]="3" ["625"]="4" ["626"]="5" ["627"]="6" ["628"]="7" ["629"]="8" ["630"]="9" )
-          for id in "${!cosmote[@]}"; do
-            echo "#EXTINF:-1,Cosmote Sport ${cosmote[$id]} HD" >> $FILE
-            echo "http://127.0.0.1:8088/https://dokko1new.kiko2.ru/dokko1/premium${id}/mono.css -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=premium${id} -http-header=Authorization=Bearer+${TOKEN}" >> $FILE
+          # 1. Cosmote Sport 1 έως 9 (Σωστή σειρά)
+          for i in {622..630}; do
+            CH_NUM=$((i-621))
+            ID="premium$i"
+            echo "#EXTINF:-1,Cosmote Sport $CH_NUM HD" >> $FILE
+            echo "http://127.0.0.1:8088/https://dokko1new.kiko2.ru/dokko1/$ID/mono.css -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=$ID -http-header=Authorization=Bearer+${TOKEN}" >> $FILE
           done
 
-          # Λίστα Nova Sports
-          declare -A nova=( ["631"]="1" ["632"]="2" ["633"]="3" ["634"]="4" ["635"]="5" ["636"]="6" ["638"]="Prime" ["637"]="Start" )
-          for id in "${!nova[@]}"; do
-            echo "#EXTINF:-1,Nova Sports ${nova[$id]} HD" >> $FILE
-            echo "http://127.0.0.1:8088/https://dokko1new.kiko2.ru/dokko1/premium${id}/mono.css -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=premium${id} -http-header=Authorization=Bearer+${TOKEN}" >> $FILE
+          # 2. Nova Sports Prime & Start
+          echo "#EXTINF:-1,Nova Sports Prime HD" >> $FILE
+          echo "http://127.0.0.1:8088/https://dokko1new.kiko2.ru/dokko1/premium638/mono.css -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=premium638 -http-header=Authorization=Bearer+${TOKEN}" >> $FILE
+          
+          echo "#EXTINF:-1,Nova Sports Start HD" >> $FILE
+          echo "http://127.0.0.1:8088/https://dokko1new.kiko2.ru/dokko1/premium637/mono.css -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=premium637 -http-header=Authorization=Bearer+${TOKEN}" >> $FILE
+
+          # 3. Nova Sports 1 έως 6
+          for i in {631..636}; do
+            CH_NUM=$((i-630))
+            ID="premium$i"
+            echo "#EXTINF:-1,Nova Sports $CH_NUM HD" >> $FILE
+            echo "http://127.0.0.1:8088/https://dokko1new.kiko2.ru/dokko1/$ID/mono.css -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=$ID -http-header=Authorization=Bearer+${TOKEN}" >> $FILE
           done
 
-          # Nova Premier League (διαφορετικός server)
+          # 4. Nova Premier League
           echo "#EXTINF:-1,Nova Sports Premier League HD" >> $FILE
           echo "http://127.0.0.1:8088/https://windnew.kiko2.ru/wind/premium599/mono.css -http-header=Origin=${ORIGIN} -http-header=Referer=${REFERER} -http-header=X-Channel-Key=premium599 -http-header=Authorization=Bearer+${TOKEN}" >> $FILE
 
-      - name: Commit and Push
+      - name: Commit and Push Changes
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          commit_message: '✨ Auto-update Tokens & Headers for OS Mio 4K'
+          commit_message: '✨ Updated Sports List (Fixed Order & Headers)'
           file_pattern: 'GreekSportsChannels.m3u8'
